@@ -40,7 +40,7 @@ async def start_run(resume: UploadFile = File(...)) -> dict:
     RUNS[run_id] = events
 
     thread = threading.Thread(
-        target=run_pipeline, args=(resume_path, 0.6, events), daemon=True
+        target=run_pipeline, args=(resume_path, 0.0, events), daemon=True
     )
     thread.start()
 
