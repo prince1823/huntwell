@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.parse
 
+import click
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..models import ApplicationResult, JobPosting, Profile
@@ -10,6 +11,19 @@ from .base import PlatformAdapter
 # NOTE: Indeed shows frequent CAPTCHAs (Cloudflare/hCaptcha) on login and on
 # repeated navigation. This adapter only handles "Indeed Apply" quick-apply
 # flows; postings that redirect to an external ATS are marked needs_review.
+#
+# Login is intentionally NOT automated -- same reasoning as LinkedIn and
+# Wellfound: typing credentials into a scripted browser risks tripping bot
+# detection, and this account signed in via Google rather than a password
+# anyway. We open a real, visible browser window and wait for a human to log
+# in by hand; the session is then saved to auth_state/indeed.json.
+#
+# UNVERIFIED: unlike the LinkedIn and Wellfound adapters, nothing below this
+# comment has been confirmed against a live account yet -- selectors are the
+# original first-draft guesses and will very likely need fixing the same way
+# LinkedIn's and Wellfound's did.
+
+LOGIN_WAIT_TIMEOUT_MS = 180_000  # 3 minutes to complete login by hand
 
 
 class IndeedAdapter(PlatformAdapter):
@@ -23,18 +37,17 @@ class IndeedAdapter(PlatformAdapter):
         self.page.goto(
             "https://secure.indeed.com/auth?hl=en_US&co=US", wait_until="domcontentloaded"
         )
-        self.page.fill('input[name="__email"]', email)
-        self.page.click('button[type="submit"]')
-        self.page.wait_for_timeout(1500)
-        if self.page.locator('input[name="__password"]').count() > 0:
-            self.page.fill('input[name="__password"]', password)
-            self.page.click('button[type="submit"]')
+        click.echo(
+            "[indeed] No valid session found. A browser window is open -- "
+            "please log in by hand (email/password or Google), then this "
+            "script will continue automatically once it sees you're logged in."
+        )
         try:
-            self.page.wait_for_selector("a[href*='/account/logout']", timeout=15000)
+            self.page.wait_for_selector("a[href*='/account/logout']", timeout=LOGIN_WAIT_TIMEOUT_MS)
         except PlaywrightTimeoutError:
             raise RuntimeError(
-                "Indeed did not confirm login — it likely showed a CAPTCHA. "
-                "Log in manually once in a non-headless run so the session is saved."
+                "Timed out waiting for manual Indeed login. Re-run with "
+                "--no-headless and log in within 3 minutes of the window opening."
             )
 
     def search_jobs(self, profile: Profile) -> list[JobPosting]:

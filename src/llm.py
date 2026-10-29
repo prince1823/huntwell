@@ -267,6 +267,15 @@ first; if nothing there covers it either, give your best reasonable numeric
 estimate for someone at this candidate's experience level and role rather
 than declining to answer.
 
+For every OTHER question -- anything open-ended, behavioral, or asking what
+tools/skills/experience the candidate has in prose form (not a bare count of
+years) -- always answer in a real sentence or two, never a bare number like
+"0". If the resume doesn't directly cover it, say so honestly and pivot to
+genuinely transferable experience (e.g. "I haven't directly used CRM tools,
+but my experience building [X] involved similar workflows") rather than
+replying with "0" or leaving it blank -- a bare "0" to a prose question looks
+broken, not honest.
+
 CANDIDATE PROFILE (JSON):
 {profile.model_dump_json(indent=2)}
 

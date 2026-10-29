@@ -35,7 +35,17 @@ Return ONLY a JSON object matching this schema, no prose, no markdown fences:
   "location": str,
   "linkedin_url": str,
   "portfolio_url": str,
-  "headline": str,          // current or target job title, e.g. "Backend Engineer"
+  "headline": str,          // the candidate's current professional identity/target
+                             // role, e.g. "Backend Engineer". Prioritize what the
+                             // PROFESSIONAL SUMMARY says they're targeting/interested
+                             // in over the title of an old past role (especially a
+                             // short internship) -- e.g. if the summary says they're
+                             // "interested in management, business operations, and
+                             // strategy analyst roles" but their most recent listed
+                             // role is a 2-month data science internship from 2 years
+                             // ago, the headline should reflect the stated target
+                             // (e.g. "Business Operations / Project Coordination"),
+                             // not the stale internship title.
   "summary": str,           // 2-3 sentence professional summary
   "skills": [str],
   "experience": [

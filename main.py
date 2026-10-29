@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 
 from src.llm import Tailor
 from src.models import Profile
+from src.platforms.ashby import AshbyAdapter
 from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
@@ -23,6 +24,7 @@ ADAPTERS = {
     "linkedin": LinkedInAdapter,
     "indeed": IndeedAdapter,
     "wellfound": WellfoundAdapter,
+    "ashby": AshbyAdapter,
 }
 
 
@@ -52,7 +54,7 @@ def run_platform(
         click.echo(f"[{platform}] daily cap ({daily_cap}) already reached, skipping")
         return
 
-    if headless and not state_file.exists():
+    if headless and not state_file.exists() and adapter_cls.requires_login:
         # Headless means no human is watching this run -- if there's no
         # saved session yet, ensure_logged_in would open an invisible
         # browser and wait up to 3 minutes for someone to complete a login

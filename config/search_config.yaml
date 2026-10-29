@@ -40,8 +40,16 @@ max_applications_per_day:
 
 platforms:
   linkedin: true
-  indeed: false
+  indeed: false  # Cloudflare blocks even authenticated sessions, see README
   wellfound: true
+  ashby: true    # guest apply, no account needed -- see ashby_companies below
+
+# Ashby has no cross-company job search -- each company hosts its own
+# careers page at jobs.ashbyhq.com/<slug>. List the company slugs to check
+# (find a slug by visiting a company's Ashby careers page and reading the
+# URL, e.g. jobs.ashbyhq.com/ashby -> slug is "ashby").
+ashby_companies:
+  - "ashby"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a

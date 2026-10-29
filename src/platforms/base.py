@@ -17,6 +17,7 @@ class PlatformAdapter(ABC):
     """
 
     name: str = "base"
+    requires_login: bool = True
 
     def __init__(self, context: BrowserContext, tailor: Tailor, config: dict):
         self.context = context
