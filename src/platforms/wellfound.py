@@ -59,22 +59,49 @@ class WellfoundAdapter(PlatformAdapter):
         self.page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded")
         self.page.wait_for_timeout(2500)
 
-        # The role field is a multi-select chip picker with autocomplete --
-        # type each configured title and press Enter to add it as a chip
-        # (additive to whatever role chips the account already has saved).
-        # The FocusButton only exists before the FIRST chip is added -- once
-        # typing starts, the field stays focused/open on its own, so
-        # re-clicking it for later titles hangs waiting for an element
-        # that's gone.
+        # The role field is a react-select multi-value chip picker. Two bugs
+        # used to live here, both confirmed live against the real account:
+        #  1. Chips are additive and persist on the account across every
+        #     past run -- without clearing them first, each new search was
+        #     silently OR'd with every title ever searched before (so an
+        #     "HR Coordinator" search also matched "Software Engineer" etc.
+        #     from earlier testing). Clear every existing chip via
+        #     react-select's own .select__multi-value__remove buttons before
+        #     typing anything new.
+        #  2. A fixed-timeout type->Enter loop raced react-select's own
+        #     commit: if Enter hadn't finished creating a chip before the
+        #     next title started typing, the two titles got concatenated
+        #     into a single malformed chip (e.g. "AI EngineerBackend
+        #     Engineer"). Fixed by polling the chip count to confirm each
+        #     title actually committed as its own chip before moving on.
         role_field = self.page.locator("[data-test='SearchBar-RoleSelect-FocusButton']")
         if role_field.count() > 0:
             role_field.first.click()
             self.page.wait_for_timeout(400)
+
+            remove_btns = self.page.locator(".select__multi-value__remove")
+            for _ in range(60):
+                if remove_btns.count() == 0:
+                    break
+                remove_btns.first.click()
+                self.page.wait_for_timeout(150)
+
+            chip_input = self.page.locator(".select__input input")
+            chips = self.page.locator(".select__multi-value")
             for title in titles:
+                before = chips.count()
                 self.page.keyboard.type(title)
-                self.page.wait_for_timeout(1000)
                 self.page.keyboard.press("Enter")
-                self.page.wait_for_timeout(800)
+                committed = False
+                for _ in range(10):
+                    self.page.wait_for_timeout(300)
+                    if chips.count() > before:
+                        committed = True
+                        break
+                if not committed and chip_input.count() > 0:
+                    # Enter never created a chip (no matching/free-text commit) --
+                    # clear the leftover text so it can't bleed into the next title.
+                    chip_input.first.fill("")
             self.page.keyboard.press("Escape")
             self.page.wait_for_timeout(2000)
 
