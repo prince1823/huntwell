@@ -115,6 +115,25 @@ that's not a limitation of this tool specifically, it's LinkedIn's/Wellfound's
 bot detection, which a real person clicking through their own login is what
 gets past. Concurrency only applies to runs *after* that.
 
+## Web UI
+
+A simple upload-and-watch UI: pick a resume, and it live-streams the same
+3-step pipeline the CLI runs (extracting resume info → scoring with AI →
+applying on LinkedIn, Wellfound & Ashby in parallel), with each application
+appearing in a results feed as it happens (company, role, fit score, status,
+and the job description).
+
+```bash
+uvicorn webapp.server:app --reload
+```
+
+Then open `http://127.0.0.1:8000`. This is a **single-account UI** — it uses
+the same root-level `auth_state/` and `applications.db` as running `main.py`
+without `--profile`, so whichever account is already logged in there (via the
+CLI's one-time `--no-headless` login) is the one the UI applies as. It does
+not add multi-account support, a job queue, or auth of its own — upload
+triggers a real run immediately, same caps and fit-scoring as the CLI.
+
 ## Known gaps / next steps
 
 - `needs_review` results mean the adapter hit a form step it didn't recognize
