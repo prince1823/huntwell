@@ -148,6 +148,7 @@ def main(
     platforms: str,
     profile: str | None,
 ) -> None:
+    from src.profile_overrides import apply_profile_overrides
     from src.profile_paths import resolve_profile_paths
 
     paths = resolve_profile_paths(profile, config_arg=config, db_arg=db)
@@ -162,6 +163,7 @@ def main(
     label = f"[{profile}] " if profile else ""
     click.echo(f"{label}Parsing resume...")
     profile_obj = parse_resume(resume, api_key, cache_dir=paths.cache_dir)
+    profile_obj = apply_profile_overrides(profile, profile_obj)
     click.echo(f"{label}Parsed profile for {profile_obj.full_name} ({profile_obj.headline})")
 
     tailor = Tailor(api_key, cache_dir=paths.cache_dir)

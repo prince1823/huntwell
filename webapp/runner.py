@@ -15,6 +15,7 @@ from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
 from src.platforms.wellfound import WellfoundAdapter
+from src.profile_overrides import apply_profile_overrides
 from src.profile_paths import resolve_profile_paths
 from src.resume_parser import parse_resume
 from src.tracker import Tracker
@@ -61,6 +62,7 @@ def run_pipeline(
 
         events.put({"type": "step", "step": 1, "label": "Extracting information from resume"})
         profile = parse_resume(str(resume_path), api_key, cache_dir=paths.cache_dir)
+        profile = apply_profile_overrides(profile_name, profile)
         events.put(
             {
                 "type": "profile",
