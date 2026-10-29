@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import urllib.parse
 
 from ..models import ApplicationResult, JobPosting, Profile
 from .base import PlatformAdapter
@@ -13,9 +12,20 @@ from .base import PlatformAdapter
 # bot-detection problems we hit on the other platforms entirely (verified
 # live on 2026-10-29: loads cleanly headless, no Cloudflare challenge).
 #
-# Because there's no cross-company search, search_jobs iterates a
-# configurable list of company slugs (config["ashby_companies"]) rather than
-# a keyword search against one site.
+# Ashby itself has no cross-company search -- not even Ashby's own site
+# offers "search all companies using Ashby" (confirmed: neither Ashby nor
+# DuckDuckGo/Google index a global directory). So search_jobs discovers
+# postings two ways:
+#   1. (primary) a free, public, keyless aggregator API --
+#      jobs.whatrunsindia.com/api/jobs -- built on Common-Crawl-based
+#      discovery of Ashby company boards, verified live 2026-10-29 (returns
+#      real, current postings with working apply URLs). This is a
+#      community-run third-party service, not something Ashby or we
+#      operate, so failures there degrade silently to source #2 rather than
+#      breaking the run.
+#   2. (fallback/supplement) any company slugs pinned explicitly in
+#      config["ashby_companies"], scraped directly off their own career page
+#      -- useful for a company the aggregator hasn't indexed yet.
 #
 # The application form always has a clearly-marked, separate "Diversity
 # Survey" section (age/gender/ethnicity/disability) that's explicitly
@@ -27,6 +37,7 @@ from .base import PlatformAdapter
 # resume -- this adapter never answers them.
 
 JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
+AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
 
 
 class AshbyAdapter(PlatformAdapter):
@@ -38,49 +49,96 @@ class AshbyAdapter(PlatformAdapter):
 
     def search_jobs(self, profile: Profile) -> list[JobPosting]:
         postings: list[JobPosting] = []
+        seen_ids: set[str] = set()
+        titles = self.config.get("titles", [])
+
+        for title in titles:
+            postings.extend(self._search_aggregator(title, seen_ids))
+
         companies = self.config.get("ashby_companies", [])
-        titles = [t.lower() for t in self.config.get("titles", [])]
-
+        lowered_titles = [t.lower() for t in titles]
         for company in companies:
-            self.page.goto(f"https://jobs.ashbyhq.com/{company}", wait_until="domcontentloaded")
-            self.page.wait_for_timeout(1500)
+            postings.extend(self._search_company_page(company, lowered_titles, seen_ids))
 
-            links = self.page.locator(f"a[href^='/{company}/']")
-            seen_ids: set[str] = set()
-            count = min(links.count(), 50)
-            for i in range(count):
-                link = links.nth(i)
-                href = link.get_attribute("href") or ""
-                m = JOB_ID_RE.search(href)
-                if not m:
-                    continue
-                job_id = m.group(1)
-                if job_id in seen_ids:
-                    continue
-                seen_ids.add(job_id)
+        return postings
 
-                title_el = link.locator("h3.ashby-job-posting-brief-title")
-                job_title = (
-                    title_el.first.inner_text().strip() if title_el.count() > 0 else link.inner_text().split("\n")[0].strip()
+    def _search_aggregator(self, title: str, seen_ids: set[str]) -> list[JobPosting]:
+        postings: list[JobPosting] = []
+        try:
+            resp = self.page.request.get(
+                AGGREGATOR_API,
+                params={"q": title, "remote": "true", "source": "ashby", "limit": "50"},
+                timeout=15000,
+            )
+            if not resp.ok:
+                return []
+            data = resp.json().get("data", [])
+        except Exception:
+            return []
+
+        for item in data:
+            job_id = item.get("jobId") or ""
+            company = item.get("company") or ""
+            apply_url = item.get("applyUrl") or item.get("jobUrl") or ""
+            key = f"{company}:{job_id}"
+            if not job_id or not apply_url or key in seen_ids:
+                continue
+            seen_ids.add(key)
+            postings.append(
+                JobPosting(
+                    platform=self.name,
+                    job_id=key,
+                    title=item.get("title", ""),
+                    company=company,
+                    location=item.get("location") or "",
+                    url=apply_url,
                 )
-                if titles and not any(t in job_title.lower() for t in titles):
-                    continue
+            )
+        return postings
 
-                job_location = ""
-                details = link.locator("div.ashby-job-posting-brief-details p").first
-                if details.count() > 0:
-                    job_location = details.inner_text().strip()
+    def _search_company_page(
+        self, company: str, lowered_titles: list[str], seen_ids: set[str]
+    ) -> list[JobPosting]:
+        postings: list[JobPosting] = []
+        self.page.goto(f"https://jobs.ashbyhq.com/{company}", wait_until="domcontentloaded")
+        self.page.wait_for_timeout(1500)
 
-                postings.append(
-                    JobPosting(
-                        platform=self.name,
-                        job_id=f"{company}:{job_id}",
-                        title=job_title,
-                        company=company,
-                        location=job_location,
-                        url=f"https://jobs.ashbyhq.com/{company}/{job_id}/application",
-                    )
+        links = self.page.locator(f"a[href^='/{company}/']")
+        count = min(links.count(), 50)
+        for i in range(count):
+            link = links.nth(i)
+            href = link.get_attribute("href") or ""
+            m = JOB_ID_RE.search(href)
+            if not m:
+                continue
+            job_id = m.group(1)
+            key = f"{company}:{job_id}"
+            if key in seen_ids:
+                continue
+
+            title_el = link.locator("h3.ashby-job-posting-brief-title")
+            job_title = (
+                title_el.first.inner_text().strip() if title_el.count() > 0 else link.inner_text().split("\n")[0].strip()
+            )
+            if lowered_titles and not any(t in job_title.lower() for t in lowered_titles):
+                continue
+            seen_ids.add(key)
+
+            job_location = ""
+            details = link.locator("div.ashby-job-posting-brief-details p").first
+            if details.count() > 0:
+                job_location = details.inner_text().strip()
+
+            postings.append(
+                JobPosting(
+                    platform=self.name,
+                    job_id=key,
+                    title=job_title,
+                    company=company,
+                    location=job_location,
+                    url=f"https://jobs.ashbyhq.com/{company}/{job_id}/application",
                 )
+            )
         return postings
 
     def apply(self, job: JobPosting, profile: Profile) -> ApplicationResult:
