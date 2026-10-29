@@ -77,7 +77,18 @@ class LinkedInAdapter(PlatformAdapter):
         postings: list[JobPosting] = []
         seen_ids: set[str] = set()
         titles = self.config.get("titles", [])
-        locations = self.config.get("locations", ["Remote"])
+        # "Remote" as a literal location string only matches postings
+        # explicitly tagged remote -- it was hardcoded as the default here,
+        # which silently excluded every onsite posting regardless of what a
+        # profile's resume actually said. Same spirit as titles_from_resume:
+        # use the resume's own stated location by default (surfaces both
+        # onsite roles there and remote roles, which still show up in
+        # city-based searches), falling back to an explicit config override
+        # or "Remote" only if the resume has no location at all.
+        if self.config.get("locations_from_resume", True) and profile.location:
+            locations = [profile.location]
+        else:
+            locations = self.config.get("locations", ["Remote"])
         experience_level = self._experience_level_param(profile.years_of_experience)
 
         # LinkedIn's keyword search supports boolean OR, so all titles go in

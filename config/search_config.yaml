@@ -12,6 +12,12 @@ titles:
   - "Backend Engineer"
   - "Full Stack Engineer"
 
+# By default, LinkedIn searches the location stated on each resume (see
+# locations_from_resume below) instead of being locked to "Remote" --
+# that used to be hardcoded here and silently excluded every onsite
+# posting. The list below is only used when a resume has no location, or
+# when locations_from_resume is set to false for this account.
+locations_from_resume: true
 locations:
   - "Remote"
 

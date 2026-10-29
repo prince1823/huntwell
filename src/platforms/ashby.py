@@ -67,7 +67,7 @@ class AshbyAdapter(PlatformAdapter):
         try:
             resp = self.page.request.get(
                 AGGREGATOR_API,
-                params={"q": title, "remote": "true", "source": "ashby", "limit": "50"},
+                params={"q": title, "source": "ashby", "limit": "50"},
                 timeout=15000,
             )
             if not resp.ok:
