@@ -33,21 +33,67 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 28px;
-    text-align: center;
+    padding: 24px;
   }
-  #drop {
-    border: 2px dashed var(--border);
-    border-radius: 10px;
-    padding: 40px 20px;
+  .person-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .person-row .file-box {
+    flex: 1;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--muted);
     cursor: pointer;
-    transition: border-color 0.15s;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
   }
-  #drop.drag { border-color: var(--accent); }
-  #drop p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
-  #drop .icon { font-size: 32px; }
-  #file-input { display: none; }
-  #filename { margin-top: 14px; font-size: 14px; color: var(--accent); min-height: 20px; }
+  .person-row .file-box.has-file { color: var(--accent); border-color: var(--accent); }
+  .person-row input[type="file"] { display: none; }
+  .person-row input.profile-name {
+    width: 240px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .person-row input.profile-name::placeholder { color: var(--muted); }
+  .person-row .remove-row {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 8px;
+  }
+  .person-row .remove-row:hover { color: var(--failed); }
+
+  #add-person {
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 2px;
+  }
+  #add-person:hover { color: var(--accent); border-color: var(--accent); }
+
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 12px 0 0;
+  }
+
   button#start {
     margin-top: 18px;
     background: var(--accent);
@@ -64,11 +110,18 @@
   }
   button#start.ready { opacity: 1; pointer-events: auto; }
 
-  #progress {
-    display: none;
-    margin: 32px 0;
+  #all-sections { margin-top: 28px; display: flex; flex-direction: column; gap: 36px; }
+
+  .person-section-header {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
   }
-  .steps { display: flex; gap: 8px; margin-bottom: 28px; }
+  .person-section-header .for-label { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+  .steps { display: flex; gap: 8px; margin-bottom: 20px; }
   .step {
     flex: 1;
     background: var(--panel);
@@ -94,16 +147,16 @@
   .step.done { border-color: var(--applied); color: var(--text); }
   .step.done .n { background: var(--applied); color: white; }
 
-  #profile-card {
+  .profile-card {
     display: none;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 16px 18px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     font-size: 13px;
   }
-  #profile-card b { color: var(--text); }
+  .profile-card b { color: var(--text); }
   .skill-pill {
     display: inline-block;
     background: var(--bg);
@@ -115,7 +168,7 @@
     color: var(--muted);
   }
 
-  .platform-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .platform-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 16px; }
   .pcol {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -136,7 +189,7 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  #results { display: flex; flex-direction: column; gap: 8px; }
+  .results { display: flex; flex-direction: column; gap: 8px; }
   .result-card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -169,225 +222,263 @@
   .jd-text.open { display: block; }
   .reason { font-size: 12px; color: var(--review); margin-top: 4px; }
 
-  #done-banner { display: none; margin-top: 20px; padding: 12px 16px; background: rgba(47,191,113,0.1); border: 1px solid var(--applied); border-radius: 8px; font-size: 13px; }
+  .done-banner { display: none; margin-top: 16px; padding: 12px 16px; background: rgba(47,191,113,0.1); border: 1px solid var(--applied); border-radius: 8px; font-size: 13px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Job Hunt Auto-Apply</h1>
-  <p class="sub">Upload a resume and watch it get parsed, scored, and applied across LinkedIn, Wellfound &amp; Ashby.</p>
+  <p class="sub">Upload one resume per person and watch each get parsed, scored, and applied across LinkedIn, Wellfound &amp; Ashby -- simultaneously, each through their own account.</p>
 
   <div id="upload-card">
-    <div id="drop">
-      <div class="icon">&#128196;</div>
-      <p>Click to choose a resume, or drag one here (PDF / DOCX / TXT)</p>
-    </div>
-    <input type="file" id="file-input" accept=".pdf,.docx,.txt" />
-    <div id="filename"></div>
+    <div id="person-rows"></div>
+    <button id="add-person" type="button">+ Add another person</button>
+    <p class="hint">Account name: leave blank to use your own already-logged-in account. For anyone else, enter the account/profile name set up via <code>--profile &lt;name&gt;</code> -- that account still needs its own one-time login done first; this UI can't create one.</p>
     <button id="start">Start</button>
   </div>
 
-  <div id="progress">
-    <div class="steps">
-      <div class="step" id="step-1"><span class="n">1</span>Extracting resume</div>
-      <div class="step" id="step-2"><span class="n">2</span>Scoring with AI</div>
-      <div class="step" id="step-3"><span class="n">3</span>Applying</div>
-    </div>
-
-    <div id="profile-card"></div>
-
-    <div class="platform-cols" id="platform-cols"></div>
-
-    <div id="results"></div>
-
-    <div id="done-banner"></div>
-  </div>
+  <div id="all-sections"></div>
 </div>
 
 <script>
-const dropEl = document.getElementById('drop');
-const fileInput = document.getElementById('file-input');
-const filenameEl = document.getElementById('filename');
+const PLATFORM_LABELS = { linkedin: 'LinkedIn', wellfound: 'Wellfound', ashby: 'Ashby' };
+
+// ---------- Upload form: dynamic person rows ----------
+
+const rowsEl = document.getElementById('person-rows');
+const addBtn = document.getElementById('add-person');
 const startBtn = document.getElementById('start');
-let chosenFile = null;
+let rowCount = 0;
 
-dropEl.addEventListener('click', () => fileInput.click());
-dropEl.addEventListener('dragover', (e) => { e.preventDefault(); dropEl.classList.add('drag'); });
-dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
-dropEl.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropEl.classList.remove('drag');
-  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+function addRow() {
+  rowCount++;
+  const row = document.createElement('div');
+  row.className = 'person-row';
+  row.innerHTML = `
+    <label class="file-box">
+      <span class="file-label">Click to choose a resume (PDF / DOCX / TXT)</span>
+      <input type="file" class="person-file" accept=".pdf,.docx,.txt" />
+    </label>
+    <input type="text" class="profile-name" placeholder="Account name (blank = your own account)" />
+    <button type="button" class="remove-row" title="Remove">&times;</button>
+  `;
+  rowsEl.appendChild(row);
 
-function setFile(f) {
-  chosenFile = f;
-  filenameEl.textContent = f.name;
-  startBtn.classList.add('ready');
+  const fileInput = row.querySelector('.person-file');
+  const fileBox = row.querySelector('.file-box');
+  const fileLabel = row.querySelector('.file-label');
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) {
+      fileBox.classList.add('has-file');
+      fileLabel.textContent = fileInput.files[0].name;
+    }
+    refreshStartState();
+  });
+  row.querySelector('.remove-row').addEventListener('click', () => {
+    row.remove();
+    refreshStartState();
+  });
 }
 
-const PLATFORM_LABELS = { linkedin: 'LinkedIn', wellfound: 'Wellfound', ashby: 'Ashby' };
-const platformState = {};
+function refreshStartState() {
+  const hasAnyFile = [...rowsEl.querySelectorAll('.person-file')].some(f => f.files.length);
+  startBtn.classList.toggle('ready', hasAnyFile);
+}
+
+addBtn.addEventListener('click', addRow);
+addRow(); // start with one row
 
 startBtn.addEventListener('click', async () => {
-  if (!chosenFile) return;
+  const rows = [...rowsEl.querySelectorAll('.person-row')];
+  const jobs = rows
+    .map(row => ({
+      file: row.querySelector('.person-file').files[0],
+      profile: row.querySelector('.profile-name').value.trim(),
+    }))
+    .filter(j => j.file);
+  if (!jobs.length) return;
+
   startBtn.classList.remove('ready');
+  startBtn.disabled = true;
   document.getElementById('upload-card').style.display = 'none';
-  document.getElementById('progress').style.display = 'block';
 
-  const form = new FormData();
-  form.append('resume', chosenFile);
-  const res = await fetch('/api/run', { method: 'POST', body: form });
-  const { run_id } = await res.json();
+  for (const job of jobs) {
+    const label = job.profile ? job.profile : (job.file.name.replace(/\.[^.]+$/, ''));
+    const section = createPersonSection(label, job.profile);
+    document.getElementById('all-sections').appendChild(section.root);
 
-  const es = new EventSource(`/api/stream/${run_id}`);
-  es.onmessage = (ev) => {
-    const evt = JSON.parse(ev.data);
-    handleEvent(evt);
-    // EventSource auto-reconnects on any connection close by default; once
-    // the run is actually finished (or the server reports an error), the
-    // server has discarded this run_id, so a reconnect attempt would just
-    // fail with "unknown run_id". Close it explicitly instead.
-    if (evt.type === 'done' || evt.type === 'error') es.close();
-  };
-  es.onerror = () => es.close();
+    const form = new FormData();
+    form.append('resume', job.file);
+    if (job.profile) form.append('profile', job.profile);
+
+    try {
+      const res = await fetch('/api/run', { method: 'POST', body: form });
+      const { run_id } = await res.json();
+      const es = new EventSource(`/api/stream/${run_id}`);
+      es.onmessage = (ev) => {
+        const evt = JSON.parse(ev.data);
+        section.handleEvent(evt);
+        if (evt.type === 'done' || evt.type === 'error') es.close();
+      };
+      es.onerror = () => es.close();
+    } catch (e) {
+      section.handleEvent({ type: 'error', message: String(e) });
+    }
+  }
 });
 
-function setStep(n) {
-  for (let i = 1; i <= 3; i++) {
-    const el = document.getElementById(`step-${i}`);
-    el.classList.remove('active', 'done');
-    if (i < n) el.classList.add('done');
-    if (i === n) el.classList.add('active');
-  }
-}
+// ---------- Per-person progress section ----------
 
-function ensurePlatformCol(platform) {
-  if (platformState[platform]) return platformState[platform];
-  const container = document.getElementById('platform-cols');
-  const col = document.createElement('div');
-  col.className = 'pcol';
-  col.innerHTML = `<h3>${PLATFORM_LABELS[platform] || platform} <span class="spinner"></span></h3><div class="status">starting…</div><div class="err"></div>`;
-  container.appendChild(col);
-  const state = { col, applied: 0, reviewed: 0, failed: 0, skipped: 0, duplicate: 0 };
-  platformState[platform] = state;
-  return state;
-}
-
-function updatePlatformStatus(platform) {
-  const s = platformState[platform];
-  if (!s) return;
-  let text = `applied ${s.applied} · needs review ${s.reviewed} · skipped ${s.skipped} · failed ${s.failed}`;
-  if (s.duplicate) text += ` · ${s.duplicate} already processed in an earlier run`;
-  s.col.querySelector('.status').textContent = text;
-}
-
-function handleEvent(evt) {
-  switch (evt.type) {
-    case 'step':
-      setStep(evt.step);
-      break;
-    case 'profile': {
-      const card = document.getElementById('profile-card');
-      card.style.display = 'block';
-      const skills = (evt.skills || []).map(s => `<span class="skill-pill">${escapeHtml(s)}</span>`).join('');
-      card.innerHTML = `<b>${escapeHtml(evt.name)}</b> &middot; ${escapeHtml(evt.headline)} &middot; ${evt.years_of_experience} yrs experience<br/>${skills}`;
-      break;
-    }
-    case 'platform_start':
-      ensurePlatformCol(evt.platform);
-      break;
-    case 'platform_search': {
-      const s = ensurePlatformCol(evt.platform);
-      s.col.querySelector('.status').textContent = `found ${evt.count} candidate postings — applying…`;
-      break;
-    }
-    case 'platform_error': {
-      const s = ensurePlatformCol(evt.platform);
-      s.col.querySelector('.err').textContent = evt.message;
-      break;
-    }
-    case 'platform_skipped': {
-      const s = ensurePlatformCol(evt.platform);
-      s.col.querySelector('.status').textContent = evt.message;
-      break;
-    }
-    case 'platform_done': {
-      const s = platformState[evt.platform];
-      if (s) {
-        const spinner = s.col.querySelector('.spinner');
-        if (spinner) spinner.remove();
-        // Always refresh the status line on completion rather than leaving
-        // whatever text was last set (e.g. "found N — applying…") -- some
-        // postings can be filtered out (already applied before, excluded
-        // keyword) without a visible event for each one, which otherwise
-        // leaves the card looking permanently stuck mid-run.
-        if (!s.col.querySelector('.err').textContent) updatePlatformStatus(evt.platform);
-      }
-      break;
-    }
-    case 'result':
-      addResult(evt);
-      break;
-    case 'error': {
-      const banner = document.getElementById('done-banner');
-      banner.style.display = 'block';
-      banner.style.background = 'rgba(232,84,61,0.1)';
-      banner.style.borderColor = 'var(--failed)';
-      banner.textContent = 'Error: ' + evt.message;
-      break;
-    }
-    case 'done': {
-      setStep(4);
-      const banner = document.getElementById('done-banner');
-      if (!banner.textContent) {
-        banner.style.display = 'block';
-        banner.textContent = 'Run complete.';
-      }
-      break;
-    }
-  }
-}
-
-function addResult(evt) {
-  const s = ensurePlatformCol(evt.platform);
-  if (evt.status === 'applied') s.applied++;
-  else if (evt.status === 'needs_review') s.reviewed++;
-  else if (evt.status === 'failed') s.failed++;
-  else if (evt.status === 'duplicate') s.duplicate++;
-  else s.skipped++;
-  updatePlatformStatus(evt.platform);
-
-  if (evt.status === 'skipped' || evt.status === 'duplicate') return; // don't clutter the feed
-
-  const results = document.getElementById('results');
-  const card = document.createElement('div');
-  card.className = `result-card ${evt.status}`;
-  const fitPct = Math.round((evt.fit || 0) * 100);
-  const jdId = 'jd-' + Math.random().toString(36).slice(2);
-  card.innerHTML = `
-    <div class="result-top">
-      <div>
-        <div class="result-title">${escapeHtml(evt.title)}</div>
-        <div class="result-company">${escapeHtml(evt.company)} &middot; ${PLATFORM_LABELS[evt.platform] || evt.platform}</div>
-      </div>
-      <span class="badge ${evt.status}">${evt.status.replace('_',' ')}</span>
+function createPersonSection(label, profileName) {
+  const root = document.createElement('div');
+  const forLabel = profileName ? `account: ${profileName}` : 'your account';
+  root.innerHTML = `
+    <div class="person-section-header">${escapeHtml(label)} <span class="for-label">&middot; ${escapeHtml(forLabel)}</span></div>
+    <div class="steps">
+      <div class="step" data-step="1"><span class="n">1</span>Extracting resume</div>
+      <div class="step" data-step="2"><span class="n">2</span>Scoring with AI</div>
+      <div class="step" data-step="3"><span class="n">3</span>Applying</div>
     </div>
-    <div class="meta">fit score ${fitPct}%${evt.url ? ` &middot; <a href="${escapeHtml(evt.url)}" target="_blank" style="color:var(--accent)">view posting</a>` : ''}</div>
-    ${evt.reason ? `<div class="reason">${escapeHtml(evt.reason)}</div>` : ''}
-    ${evt.jd ? `<span class="jd-toggle" data-target="${jdId}">Show job description</span><div class="jd-text" id="${jdId}">${escapeHtml(evt.jd)}</div>` : ''}
+    <div class="profile-card"></div>
+    <div class="platform-cols"></div>
+    <div class="results"></div>
+    <div class="done-banner"></div>
   `;
-  results.prepend(card);
 
-  const toggle = card.querySelector('.jd-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      const jd = card.querySelector('.jd-text');
-      jd.classList.toggle('open');
-      toggle.textContent = jd.classList.contains('open') ? 'Hide job description' : 'Show job description';
-    });
+  const platformState = {};
+
+  function setStep(n) {
+    for (let i = 1; i <= 3; i++) {
+      const el = root.querySelector(`.step[data-step="${i}"]`);
+      el.classList.remove('active', 'done');
+      if (i < n) el.classList.add('done');
+      if (i === n) el.classList.add('active');
+    }
   }
+
+  function ensurePlatformCol(platform) {
+    if (platformState[platform]) return platformState[platform];
+    const container = root.querySelector('.platform-cols');
+    const col = document.createElement('div');
+    col.className = 'pcol';
+    col.innerHTML = `<h3>${PLATFORM_LABELS[platform] || platform} <span class="spinner"></span></h3><div class="status">starting…</div><div class="err"></div>`;
+    container.appendChild(col);
+    const state = { col, applied: 0, reviewed: 0, failed: 0, skipped: 0, duplicate: 0 };
+    platformState[platform] = state;
+    return state;
+  }
+
+  function updatePlatformStatus(platform) {
+    const s = platformState[platform];
+    if (!s) return;
+    let text = `applied ${s.applied} · needs review ${s.reviewed} · skipped ${s.skipped} · failed ${s.failed}`;
+    if (s.duplicate) text += ` · ${s.duplicate} already processed in an earlier run`;
+    s.col.querySelector('.status').textContent = text;
+  }
+
+  function addResult(evt) {
+    const s = ensurePlatformCol(evt.platform);
+    if (evt.status === 'applied') s.applied++;
+    else if (evt.status === 'needs_review') s.reviewed++;
+    else if (evt.status === 'failed') s.failed++;
+    else if (evt.status === 'duplicate') s.duplicate++;
+    else s.skipped++;
+    updatePlatformStatus(evt.platform);
+
+    if (evt.status === 'skipped' || evt.status === 'duplicate') return;
+
+    const results = root.querySelector('.results');
+    const card = document.createElement('div');
+    card.className = `result-card ${evt.status}`;
+    const fitPct = Math.round((evt.fit || 0) * 100);
+    const jdId = 'jd-' + Math.random().toString(36).slice(2);
+    card.innerHTML = `
+      <div class="result-top">
+        <div>
+          <div class="result-title">${escapeHtml(evt.title)}</div>
+          <div class="result-company">${escapeHtml(evt.company)} &middot; ${PLATFORM_LABELS[evt.platform] || evt.platform}</div>
+        </div>
+        <span class="badge ${evt.status}">${evt.status.replace('_',' ')}</span>
+      </div>
+      <div class="meta">fit score ${fitPct}%${evt.url ? ` &middot; <a href="${escapeHtml(evt.url)}" target="_blank" style="color:var(--accent)">view posting</a>` : ''}</div>
+      ${evt.reason ? `<div class="reason">${escapeHtml(evt.reason)}</div>` : ''}
+      ${evt.jd ? `<span class="jd-toggle" data-target="${jdId}">Show job description</span><div class="jd-text" id="${jdId}">${escapeHtml(evt.jd)}</div>` : ''}
+    `;
+    results.prepend(card);
+
+    const toggle = card.querySelector('.jd-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        const jd = card.querySelector('.jd-text');
+        jd.classList.toggle('open');
+        toggle.textContent = jd.classList.contains('open') ? 'Hide job description' : 'Show job description';
+      });
+    }
+  }
+
+  function handleEvent(evt) {
+    switch (evt.type) {
+      case 'step':
+        setStep(evt.step);
+        break;
+      case 'profile': {
+        const card = root.querySelector('.profile-card');
+        card.style.display = 'block';
+        const skills = (evt.skills || []).map(s => `<span class="skill-pill">${escapeHtml(s)}</span>`).join('');
+        card.innerHTML = `<b>${escapeHtml(evt.name)}</b> &middot; ${escapeHtml(evt.headline)} &middot; ${evt.years_of_experience} yrs experience<br/>${skills}`;
+        break;
+      }
+      case 'platform_start':
+        ensurePlatformCol(evt.platform);
+        break;
+      case 'platform_search': {
+        const s = ensurePlatformCol(evt.platform);
+        s.col.querySelector('.status').textContent = `found ${evt.count} candidate postings — applying…`;
+        break;
+      }
+      case 'platform_error': {
+        const s = ensurePlatformCol(evt.platform);
+        s.col.querySelector('.err').textContent = evt.message;
+        break;
+      }
+      case 'platform_skipped': {
+        const s = ensurePlatformCol(evt.platform);
+        s.col.querySelector('.status').textContent = evt.message;
+        break;
+      }
+      case 'platform_done': {
+        const s = platformState[evt.platform];
+        if (s) {
+          const spinner = s.col.querySelector('.spinner');
+          if (spinner) spinner.remove();
+          if (!s.col.querySelector('.err').textContent) updatePlatformStatus(evt.platform);
+        }
+        break;
+      }
+      case 'result':
+        addResult(evt);
+        break;
+      case 'error': {
+        const banner = root.querySelector('.done-banner');
+        banner.style.display = 'block';
+        banner.style.background = 'rgba(232,84,61,0.1)';
+        banner.style.borderColor = 'var(--failed)';
+        banner.textContent = 'Error: ' + evt.message;
+        break;
+      }
+      case 'done': {
+        setStep(4);
+        const banner = root.querySelector('.done-banner');
+        if (!banner.textContent) {
+          banner.style.display = 'block';
+          banner.textContent = 'Run complete.';
+        }
+        break;
+      }
+    }
+  }
+
+  return { root, handleEvent };
 }
 
 function escapeHtml(s) {

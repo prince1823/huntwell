@@ -15,6 +15,7 @@ from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
 from src.platforms.wellfound import WellfoundAdapter
+from src.profile_paths import resolve_profile_paths
 from src.resume_parser import parse_resume
 from src.tracker import Tracker
 
@@ -27,24 +28,31 @@ ADAPTERS = {
 
 RUN_PLATFORMS = ["linkedin", "wellfound", "ashby"]  # indeed excluded -- see README
 
-ROOT = Path(__file__).resolve().parent.parent
-STATE_DIR = ROOT / "auth_state"
-CONFIG_PATH = ROOT / "config" / "search_config.yaml"
-DB_PATH = ROOT / "applications.db"
 
-
-def _load_config() -> dict:
-    with open(CONFIG_PATH) as f:
+def _load_config(config_path: Path) -> dict:
+    with open(config_path) as f:
         return yaml.safe_load(f)
 
 
-def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -> None:
+def run_pipeline(
+    resume_path: Path, min_fit_score: float, events: queue.Queue, profile_name: str | None = None
+) -> None:
     """Runs the full pipeline for the UI: parse resume, then search+apply on
     all RUN_PLATFORMS in parallel threads, pushing progress events into the
-    given queue. Uses the same auth_state/applications.db as the CLI (the
-    already-authenticated root account) -- this is a single-account UI, not
-    a multi-profile one."""
+    given queue.
+
+    profile_name=None uses the original single-account layout (root-level
+    auth_state/applications.db). A real name uses profiles/<name>/ instead,
+    via the same resolve_profile_paths the CLI's --profile flag uses --
+    this is what lets multiple real accounts each apply through their own
+    identity in the same UI run, rather than all going through one account.
+    Each named profile still needs its own prior one-time CLI login
+    (--no-headless) before it can do anything here; nothing here can create
+    or bypass that.
+    """
     try:
+        paths = resolve_profile_paths(profile_name)
+
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             events.put({"type": "error", "message": "ANTHROPIC_API_KEY not set in .env"})
@@ -52,7 +60,7 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
             return
 
         events.put({"type": "step", "step": 1, "label": "Extracting information from resume"})
-        profile = parse_resume(str(resume_path), api_key)
+        profile = parse_resume(str(resume_path), api_key, cache_dir=paths.cache_dir)
         events.put(
             {
                 "type": "profile",
@@ -64,8 +72,8 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
         )
 
         events.put({"type": "step", "step": 2, "label": "Scoring postings and tailoring answers with AI"})
-        tailor = Tailor(api_key)
-        cfg = _load_config()
+        tailor = Tailor(api_key, cache_dir=paths.cache_dir)
+        cfg = _load_config(paths.config_path)
 
         events.put({"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
         threads = []
@@ -79,7 +87,7 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
             # silently killed every platform thread the first time this ran.
             t = threading.Thread(
                 target=_run_one_platform,
-                args=(platform, cfg, profile, tailor, min_fit_score, events),
+                args=(platform, cfg, profile, tailor, min_fit_score, events, paths.state_dir, paths.db_path),
                 daemon=True,
             )
             t.start()
@@ -100,16 +108,18 @@ def _run_one_platform(
     tailor: Tailor,
     min_fit_score: float,
     events: queue.Queue,
+    state_dir: Path,
+    db_path: Path,
 ) -> None:
     adapter_cls = ADAPTERS[platform]
-    state_file = STATE_DIR / f"{platform}.json"
+    state_file = state_dir / f"{platform}.json"
     daily_cap = config.get("max_applications_per_day", {}).get(
         platform, config.get("max_applications_per_platform_per_day", 20)
     )
 
     events.put({"type": "platform_start", "platform": platform})
 
-    tracker = Tracker(str(DB_PATH))
+    tracker = Tracker(str(db_path))
     already_today = tracker.count_applied_today(platform)
     if already_today >= daily_cap:
         events.put({"type": "platform_error", "platform": platform, "message": f"Daily cap ({daily_cap}) already reached"})

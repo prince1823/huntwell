@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from webapp.runner import run_pipeline
@@ -30,7 +30,10 @@ def index() -> FileResponse:
 
 
 @app.post("/api/run")
-async def start_run(resume: UploadFile = File(...)) -> dict:
+async def start_run(
+    resume: UploadFile = File(...),
+    profile: str | None = Form(None),
+) -> dict:
     run_id = uuid.uuid4().hex
     suffix = Path(resume.filename or "resume.pdf").suffix or ".pdf"
     resume_path = UPLOADS_DIR / f"{run_id}{suffix}"
@@ -39,8 +42,9 @@ async def start_run(resume: UploadFile = File(...)) -> dict:
     events: queue.Queue = queue.Queue()
     RUNS[run_id] = events
 
+    profile = (profile or "").strip() or None
     thread = threading.Thread(
-        target=run_pipeline, args=(resume_path, 0.0, events), daemon=True
+        target=run_pipeline, args=(resume_path, 0.0, events, profile), daemon=True
     )
     thread.start()
 

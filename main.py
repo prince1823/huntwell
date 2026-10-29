@@ -148,45 +148,24 @@ def main(
     platforms: str,
     profile: str | None,
 ) -> None:
-    from src.cache import DEFAULT_CACHE_DIR
+    from src.profile_paths import resolve_profile_paths
 
-    if profile:
-        profile_dir = Path("profiles") / profile
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        state_dir = profile_dir / "auth_state"
-        state_dir.mkdir(exist_ok=True)
-        cache_dir = profile_dir / "cache"
-        if db is None:
-            db = str(profile_dir / "applications.db")
-        # A profile can override credentials/API key via its own .env
-        # (e.g. a different person's ANTHROPIC_API_KEY) without touching
-        # the shared root .env other profiles use.
-        profile_env = profile_dir / ".env"
-        if profile_env.exists():
-            load_dotenv(profile_env, override=True)
-        profile_config = profile_dir / "search_config.yaml"
-        if config == "config/search_config.yaml" and profile_config.exists():
-            config = str(profile_config)
-    else:
-        state_dir = Path("auth_state")
-        state_dir.mkdir(exist_ok=True)
-        cache_dir = DEFAULT_CACHE_DIR
-        if db is None:
-            db = "applications.db"
+    paths = resolve_profile_paths(profile, config_arg=config, db_arg=db)
+    state_dir = paths.state_dir
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise click.ClickException("Set ANTHROPIC_API_KEY in your .env file")
 
-    cfg = load_config(config)
+    cfg = load_config(str(paths.config_path))
 
     label = f"[{profile}] " if profile else ""
     click.echo(f"{label}Parsing resume...")
-    profile_obj = parse_resume(resume, api_key, cache_dir=cache_dir)
+    profile_obj = parse_resume(resume, api_key, cache_dir=paths.cache_dir)
     click.echo(f"{label}Parsed profile for {profile_obj.full_name} ({profile_obj.headline})")
 
-    tailor = Tailor(api_key, cache_dir=cache_dir)
-    tracker = Tracker(db)
+    tailor = Tailor(api_key, cache_dir=paths.cache_dir)
+    tracker = Tracker(str(paths.db_path))
 
     requested = [p.strip() for p in platforms.split(",") if p.strip()] or [
         name for name, enabled in cfg.get("platforms", {}).items() if enabled
