@@ -1,0 +1,55 @@
+# Job search criteria used by every platform adapter.
+
+titles:
+  - "Software Engineer"
+  - "AI Engineer"
+  - "Backend Engineer"
+  - "Full Stack Engineer"
+
+locations:
+  - "Remote"
+
+keywords_include: []     # postings must contain at least one (empty = no filter)
+keywords_exclude:        # postings whose TITLE contains any of these are skipped before scoring
+  - "Senior Staff"
+  - "Clearance Required"
+  # Wellfound has no native experience-level search filter (unlike LinkedIn's
+  # f_E param), so seniority mismatches are filtered by title keyword instead
+  # of by search itself -- fit-scoring still catches senior-sounding titles
+  # that slip through without one of these exact words.
+  - "Senior"
+  - "Staff"
+  - "Principal"
+  - "Lead"
+  - "Director"
+  - "Head of"
+  - "VP "
+  - "Manager"
+
+min_salary: 0             # 0 = no filter; only enforced when the platform exposes salary data
+
+remote_only: false
+
+max_applications_per_platform_per_day: 10  # default/fallback for any platform not listed below
+
+# Per-platform overrides -- higher volume on one platform doesn't have to
+# mean higher volume (and higher ban risk) on another.
+max_applications_per_day:
+  linkedin: 50
+  wellfound: 50
+
+platforms:
+  linkedin: true
+  indeed: false
+  wellfound: true
+
+# Answers used for common screening questions when the LLM can't infer them from your resume.
+# Edit these to your actual numbers -- without them, the agent has to guess a
+# "reasonable" figure for salary/notice-period questions, which you may not want.
+screening_defaults:
+  work_authorization: "Yes, I am authorized to work in this country without sponsorship."
+  willing_to_relocate: "No"
+  require_visa_sponsorship: "No"
+  current_ctc_inr: ""           # e.g. "600000" -- leave blank to let the agent estimate
+  expected_ctc_inr: ""          # e.g. "900000"
+  notice_period_days: "0"

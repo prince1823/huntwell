@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.claude/
+.env
+auth_state/
+applications.db
+.cache/
+profiles/
+*.pdf
+*.docx
