@@ -425,7 +425,15 @@ function createPersonSection(label, profileName) {
         const card = root.querySelector('.profile-card');
         card.style.display = 'block';
         const skills = (evt.skills || []).map(s => `<span class="skill-pill">${escapeHtml(s)}</span>`).join('');
-        card.innerHTML = `<b>${escapeHtml(evt.name)}</b> &middot; ${escapeHtml(evt.headline)} &middot; ${evt.years_of_experience} yrs experience<br/>${skills}`;
+        card.innerHTML = `<b>${escapeHtml(evt.name)}</b> &middot; ${escapeHtml(evt.headline)} &middot; ${evt.years_of_experience} yrs experience<br/>${skills}<div class="search-titles"></div>`;
+        break;
+      }
+      case 'search_titles': {
+        const card = root.querySelector('.profile-card');
+        const target = card.querySelector('.search-titles');
+        if (target) {
+          target.innerHTML = `<div class="meta" style="margin-top:8px">Searching for: ${evt.titles.map(t => escapeHtml(t)).join(', ')}</div>`;
+        }
         break;
       }
       case 'platform_start':

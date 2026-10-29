@@ -1,5 +1,11 @@
 # Job search criteria used by every platform adapter.
 
+# By default, search titles are generated per-run from each uploaded resume
+# (see Tailor.suggest_search_titles), so different people's resumes search
+# for roles relevant to them instead of all sharing this list. The list
+# below is only used as a fallback if that AI call fails, or if you set
+# `titles_from_resume: false` below to pin a fixed list for this account.
+titles_from_resume: true
 titles:
   - "Software Engineer"
   - "AI Engineer"

@@ -331,6 +331,47 @@ JOB DESCRIPTION:
         self.cache.set(key, score)
         return score
 
+    def suggest_search_titles(self, profile: Profile, max_titles: int = 5) -> list[str]:
+        """Return a short list of job titles to search for on LinkedIn/Wellfound/Ashby,
+        derived from this specific resume instead of one hardcoded list shared by
+        every account -- so a product manager's resume and a backend engineer's
+        resume searching through the same run each get titles relevant to them."""
+        key = JSONCache.make_key("suggest_search_titles", self._profile_fingerprint(profile))
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+
+        prompt = f"""Suggest up to {max_titles} job titles to search for on job boards for this
+candidate, ordered by relevance. Use titles as they commonly appear in real job
+postings (e.g. "Backend Engineer", not "Backend Software Development
+Professional"). Base this on their stated target role and their actual
+skills/experience -- do not suggest titles requiring skills or seniority they
+don't have. Reply with ONLY a JSON array of strings, nothing else.
+
+CANDIDATE HEADLINE: {profile.headline}
+CANDIDATE SUMMARY: {profile.summary}
+CANDIDATE SKILLS: {", ".join(profile.skills)}
+CANDIDATE YEARS OF EXPERIENCE: {profile.years_of_experience}
+MOST RECENT ROLE: {profile.experience[0].title if profile.experience else "N/A"}
+"""
+        resp = self.client.chat.completions.create(
+            model=MODEL, max_tokens=150, messages=[{"role": "user", "content": prompt}]
+        )
+        text = resp.choices[0].message.content.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        try:
+            titles = json.loads(text)
+            if not isinstance(titles, list) or not titles:
+                raise ValueError
+            titles = [str(t) for t in titles][:max_titles]
+        except (json.JSONDecodeError, ValueError):
+            titles = [profile.headline] if profile.headline else []
+        self.cache.set(key, titles)
+        return titles
+
     @staticmethod
     def _format_experience(profile: Profile) -> str:
         lines = []

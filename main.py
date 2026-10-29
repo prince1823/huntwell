@@ -167,6 +167,15 @@ def main(
     tailor = Tailor(api_key, cache_dir=paths.cache_dir)
     tracker = Tracker(str(paths.db_path))
 
+    # Search titles come from THIS resume by default, not one static list in
+    # the config -- set `titles_from_resume: false` in search_config.yaml
+    # (or profiles/<name>/search_config.yaml) to pin a fixed list instead.
+    if cfg.get("titles_from_resume", True):
+        suggested_titles = tailor.suggest_search_titles(profile_obj)
+        if suggested_titles:
+            click.echo(f"{label}Searching titles: {', '.join(suggested_titles)}")
+            cfg["titles"] = suggested_titles
+
     requested = [p.strip() for p in platforms.split(",") if p.strip()] or [
         name for name, enabled in cfg.get("platforms", {}).items() if enabled
     ]

@@ -75,6 +75,17 @@ def run_pipeline(
         tailor = Tailor(api_key, cache_dir=paths.cache_dir)
         cfg = _load_config(paths.config_path)
 
+        # Search titles come from THIS resume by default, not one static list
+        # shared by every account -- so two different people's resumes
+        # uploaded in the same run each get titles relevant to them. A
+        # profile can still pin its own fixed list via
+        # `titles_from_resume: false` in its search_config.yaml.
+        if cfg.get("titles_from_resume", True):
+            suggested_titles = tailor.suggest_search_titles(profile)
+            if suggested_titles:
+                cfg["titles"] = suggested_titles
+                events.put({"type": "search_titles", "titles": suggested_titles})
+
         events.put({"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
         threads = []
         for platform in RUN_PLATFORMS:
