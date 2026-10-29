@@ -44,7 +44,7 @@ async def start_run(
 
     profile = (profile or "").strip() or None
     thread = threading.Thread(
-        target=run_pipeline, args=(resume_path, 0.30, events, profile), daemon=True
+        target=run_pipeline, args=(resume_path, 0.60, events, profile), daemon=True
     )
     thread.start()
 
