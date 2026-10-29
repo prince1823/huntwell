@@ -317,6 +317,12 @@ function handleEvent(evt) {
       if (s) {
         const spinner = s.col.querySelector('.spinner');
         if (spinner) spinner.remove();
+        // Always refresh the status line on completion rather than leaving
+        // whatever text was last set (e.g. "found N — applying…") -- some
+        // postings can be filtered out (already applied before, excluded
+        // keyword) without a visible event for each one, which otherwise
+        // leaves the card looking permanently stuck mid-run.
+        if (!s.col.querySelector('.err').textContent) updatePlatformStatus(evt.platform);
       }
       break;
     }

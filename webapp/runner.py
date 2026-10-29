@@ -154,7 +154,29 @@ def _run_one_platform(
                     break
                 if tracker.already_handled(job):
                     continue
-                if any(kw.lower() in job.title.lower() for kw in config.get("keywords_exclude", [])):
+                excluded_kw = next(
+                    (kw for kw in config.get("keywords_exclude", []) if kw.lower() in job.title.lower()),
+                    None,
+                )
+                if excluded_kw:
+                    # Emit a result even for keyword-filtered postings --
+                    # silently `continue`-ing left the UI showing "found N,
+                    # applying..." forever with no further events, which
+                    # reads as stuck/broken even though the filtering is
+                    # correct and intentional.
+                    events.put(
+                        {
+                            "type": "result",
+                            "platform": platform,
+                            "company": job.company,
+                            "title": job.title,
+                            "url": job.url,
+                            "status": "skipped",
+                            "fit": None,
+                            "jd": (job.description or "")[:400],
+                            "reason": f"title matched excluded keyword '{excluded_kw}'",
+                        }
+                    )
                     continue
 
                 fit = tailor.score_fit(profile, job)
