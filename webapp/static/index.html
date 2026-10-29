@@ -270,7 +270,7 @@ function ensurePlatformCol(platform) {
   col.className = 'pcol';
   col.innerHTML = `<h3>${PLATFORM_LABELS[platform] || platform} <span class="spinner"></span></h3><div class="status">starting…</div><div class="err"></div>`;
   container.appendChild(col);
-  const state = { col, applied: 0, reviewed: 0, failed: 0, skipped: 0 };
+  const state = { col, applied: 0, reviewed: 0, failed: 0, skipped: 0, duplicate: 0 };
   platformState[platform] = state;
   return state;
 }
@@ -278,8 +278,9 @@ function ensurePlatformCol(platform) {
 function updatePlatformStatus(platform) {
   const s = platformState[platform];
   if (!s) return;
-  s.col.querySelector('.status').textContent =
-    `applied ${s.applied} · needs review ${s.reviewed} · skipped ${s.skipped} · failed ${s.failed}`;
+  let text = `applied ${s.applied} · needs review ${s.reviewed} · skipped ${s.skipped} · failed ${s.failed}`;
+  if (s.duplicate) text += ` · ${s.duplicate} already processed in an earlier run`;
+  s.col.querySelector('.status').textContent = text;
 }
 
 function handleEvent(evt) {
@@ -354,10 +355,11 @@ function addResult(evt) {
   if (evt.status === 'applied') s.applied++;
   else if (evt.status === 'needs_review') s.reviewed++;
   else if (evt.status === 'failed') s.failed++;
+  else if (evt.status === 'duplicate') s.duplicate++;
   else s.skipped++;
   updatePlatformStatus(evt.platform);
 
-  if (evt.status === 'skipped') return; // don't clutter the feed with low-fit skips
+  if (evt.status === 'skipped' || evt.status === 'duplicate') return; // don't clutter the feed
 
   const results = document.getElementById('results');
   const card = document.createElement('div');

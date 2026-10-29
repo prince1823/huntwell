@@ -153,6 +153,25 @@ def _run_one_platform(
                 if applied_count >= daily_cap:
                     break
                 if tracker.already_handled(job):
+                    # Same visibility problem as the keyword-exclude case:
+                    # re-running the same search finds mostly postings
+                    # already recorded from earlier runs. Surface that
+                    # distinctly (not lumped into generic "skipped") so it's
+                    # clear *why* nothing new happened, instead of it
+                    # looking like the pipeline silently did nothing.
+                    events.put(
+                        {
+                            "type": "result",
+                            "platform": platform,
+                            "company": job.company,
+                            "title": job.title,
+                            "url": job.url,
+                            "status": "duplicate",
+                            "fit": None,
+                            "jd": "",
+                            "reason": "already processed in an earlier run",
+                        }
+                    )
                     continue
                 excluded_kw = next(
                     (kw for kw in config.get("keywords_exclude", []) if kw.lower() in job.title.lower()),
