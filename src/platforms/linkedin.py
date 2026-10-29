@@ -80,45 +80,54 @@ class LinkedInAdapter(PlatformAdapter):
         locations = self.config.get("locations", ["Remote"])
         experience_level = self._experience_level_param(profile.years_of_experience)
 
-        for title in titles:
-            for location in locations:
-                params = {
-                    "keywords": title,
-                    "location": location,
-                    "f_AL": "true",  # Easy Apply filter
-                    "f_E": experience_level,  # LinkedIn's own seniority filter, from the resume
-                    "sortBy": "DD",  # most recent
-                }
-                url = "https://www.linkedin.com/jobs/search/?" + urllib.parse.urlencode(params)
-                # Rendering this page is genuinely variable in latency
-                # (noticeably slower/less consistent on newer, less-weighted
-                # accounts) -- a single 15s wait isn't reliable enough to
-                # conclude "no results" from. Retry the navigation once
-                # before giving up on this title/location combo.
-                found_results = False
-                for attempt in range(2):
-                    self.page.goto(url, wait_until="domcontentloaded")
-                    try:
-                        self.page.wait_for_selector("button[aria-label^='Dismiss ']", timeout=15000)
-                        found_results = True
-                        break
-                    except PlaywrightTimeoutError:
-                        continue
-                if not found_results:
-                    continue  # no results for this title/location combo
-                self.page.wait_for_timeout(1500)
+        # LinkedIn's keyword search supports boolean OR, so all titles go in
+        # ONE query instead of a separate search per title -- confirmed live
+        # (a 5-title OR query returned 99+ relevant results, same as
+        # searching each title separately). location has no such
+        # combinator in the search URL (only one value at a time), so that
+        # loop stays -- this still cuts N titles x M locations down to just
+        # M searches instead of N x M.
+        keywords = " OR ".join(f'"{t}"' for t in titles) if titles else ""
 
-                classic_cards = self.page.locator("li[data-occludable-job-id]")
-                for _ in range(6):
-                    if classic_cards.count() > 0:
-                        break
-                    self.page.wait_for_timeout(500)
+        for location in locations:
+            params = {
+                "keywords": keywords,
+                "location": location,
+                "f_AL": "true",  # Easy Apply filter
+                "f_E": experience_level,  # LinkedIn's own seniority filter, from the resume
+                "sortBy": "DD",  # most recent
+            }
+            url = "https://www.linkedin.com/jobs/search/?" + urllib.parse.urlencode(params)
+            # Rendering this page is genuinely variable in latency
+            # (noticeably slower/less consistent on newer, less-weighted
+            # accounts) -- a single 15s wait isn't reliable enough to
+            # conclude "no results" from. Retry the navigation once before
+            # giving up on this location.
+            found_results = False
+            for attempt in range(2):
+                self.page.goto(url, wait_until="domcontentloaded")
+                try:
+                    self.page.wait_for_selector("button[aria-label^='Dismiss ']", timeout=15000)
+                    found_results = True
+                    break
+                except PlaywrightTimeoutError:
+                    continue
+            if not found_results:
+                continue  # no results for this location
 
+            self.page.wait_for_timeout(1500)
+
+            classic_cards = self.page.locator("li[data-occludable-job-id]")
+            for _ in range(6):
                 if classic_cards.count() > 0:
-                    new_postings = self._extract_classic_ui_cards(classic_cards, seen_ids)
-                else:
-                    new_postings = self._extract_new_ui_cards(seen_ids)
-                postings.extend(new_postings)
+                    break
+                self.page.wait_for_timeout(500)
+
+            if classic_cards.count() > 0:
+                new_postings = self._extract_classic_ui_cards(classic_cards, seen_ids)
+            else:
+                new_postings = self._extract_new_ui_cards(seen_ids)
+            postings.extend(new_postings)
         return postings
 
     def _extract_classic_ui_cards(self, cards, seen_ids: set[str]) -> list[JobPosting]:
