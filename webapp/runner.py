@@ -65,7 +65,6 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
 
         events.put({"type": "step", "step": 2, "label": "Scoring postings and tailoring answers with AI"})
         tailor = Tailor(api_key)
-        tracker = Tracker(str(DB_PATH))
         cfg = _load_config()
 
         events.put({"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
@@ -74,9 +73,13 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
             if not cfg.get("platforms", {}).get(platform, False):
                 events.put({"type": "platform_skipped", "platform": platform, "message": "disabled in config"})
                 continue
+            # Each thread opens its own Tracker/sqlite3 connection -- a
+            # connection object can't be shared across threads (Python's
+            # sqlite3 enforces this and raises ProgrammingError), which
+            # silently killed every platform thread the first time this ran.
             t = threading.Thread(
                 target=_run_one_platform,
-                args=(platform, cfg, profile, tailor, tracker, min_fit_score, events),
+                args=(platform, cfg, profile, tailor, min_fit_score, events),
                 daemon=True,
             )
             t.start()
@@ -84,8 +87,6 @@ def run_pipeline(resume_path: Path, min_fit_score: float, events: queue.Queue) -
 
         for t in threads:
             t.join()
-
-        tracker.close()
     except Exception as e:  # noqa: BLE001 -- surface any crash to the UI instead of hanging it
         events.put({"type": "error", "message": str(e)})
     finally:
@@ -97,7 +98,6 @@ def _run_one_platform(
     config: dict,
     profile: Profile,
     tailor: Tailor,
-    tracker: Tracker,
     min_fit_score: float,
     events: queue.Queue,
 ) -> None:
@@ -109,10 +109,12 @@ def _run_one_platform(
 
     events.put({"type": "platform_start", "platform": platform})
 
+    tracker = Tracker(str(DB_PATH))
     already_today = tracker.count_applied_today(platform)
     if already_today >= daily_cap:
         events.put({"type": "platform_error", "platform": platform, "message": f"Daily cap ({daily_cap}) already reached"})
         events.put({"type": "platform_done", "platform": platform})
+        tracker.close()
         return
 
     if not state_file.exists() and adapter_cls.requires_login:
@@ -124,6 +126,7 @@ def _run_one_platform(
             }
         )
         events.put({"type": "platform_done", "platform": platform})
+        tracker.close()
         return
 
     try:
@@ -200,4 +203,5 @@ def _run_one_platform(
     except Exception as e:  # noqa: BLE001 -- one platform crashing shouldn't hang the UI
         events.put({"type": "platform_error", "platform": platform, "message": str(e)})
     finally:
+        tracker.close()
         events.put({"type": "platform_done", "platform": platform})

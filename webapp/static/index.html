@@ -242,7 +242,16 @@ startBtn.addEventListener('click', async () => {
   const { run_id } = await res.json();
 
   const es = new EventSource(`/api/stream/${run_id}`);
-  es.onmessage = (ev) => handleEvent(JSON.parse(ev.data));
+  es.onmessage = (ev) => {
+    const evt = JSON.parse(ev.data);
+    handleEvent(evt);
+    // EventSource auto-reconnects on any connection close by default; once
+    // the run is actually finished (or the server reports an error), the
+    // server has discarded this run_id, so a reconnect attempt would just
+    // fail with "unknown run_id". Close it explicitly instead.
+    if (evt.type === 'done' || evt.type === 'error') es.close();
+  };
+  es.onerror = () => es.close();
 });
 
 function setStep(n) {
