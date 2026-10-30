@@ -40,6 +40,20 @@ JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
 AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
 
 
+def _experience_param(years: int) -> str | None:
+    """Map resume years_of_experience to the aggregator's own exp filter
+    (confirmed from source: "1"=jobs wanting <=1yr, "2"=<=3yr, "5"=<=6yr --
+    it has no bucket for more senior profiles, so those get no filter here
+    and rely on keywords_exclude/fit-scoring instead)."""
+    if years <= 1:
+        return "1"
+    if years <= 3:
+        return "2"
+    if years <= 6:
+        return "5"
+    return None
+
+
 class AshbyAdapter(PlatformAdapter):
     name = "ashby"
     requires_login = False
@@ -53,7 +67,7 @@ class AshbyAdapter(PlatformAdapter):
         titles = self.config.get("titles", [])
 
         for title in titles:
-            postings.extend(self._search_aggregator(title, seen_ids))
+            postings.extend(self._search_aggregator(title, seen_ids, profile))
 
         companies = self.config.get("ashby_companies", [])
         lowered_titles = [t.lower() for t in titles]
@@ -62,7 +76,7 @@ class AshbyAdapter(PlatformAdapter):
 
         return postings
 
-    def _search_aggregator(self, title: str, seen_ids: set[str]) -> list[JobPosting]:
+    def _search_aggregator(self, title: str, seen_ids: set[str], profile: Profile) -> list[JobPosting]:
         postings: list[JobPosting] = []
         # The aggregator's query param is "search", not "q" -- confirmed
         # live against the actual route source (web/app/api/jobs/route.ts
@@ -76,12 +90,33 @@ class AshbyAdapter(PlatformAdapter):
         # MAX_LIMIT is a hard server-side cap (confirmed from source: 100),
         # requesting more does nothing -- pagination (the "page" param) is
         # how to get past it, so this pulls up to max_pages of 100 each.
+        #
+        # exp/minScore/department are free, server-side relevance filters
+        # (confirmed against the aggregator's own source: web/lib/scoring.ts,
+        # src/config/rules.json) -- they narrow the pool before we even
+        # download or fit-score anything, instead of spending LLM calls on
+        # postings that are senior-level or low-relevance by the
+        # aggregator's own keyword scoring. Verified live: "exp=1" alone cut
+        # a 3,975-match "Backend Engineer" search to 811, and adding
+        # minScore+department brought it to 574, with entry-level/new-grad
+        # titles actually surfacing at the top instead of senior ones.
+        params = {"search": title, "source": "ashby", "limit": "100"}
+        exp = _experience_param(profile.years_of_experience)
+        if exp and self.config.get("ashby_exp_filter", True):
+            params["exp"] = exp
+        min_score = self.config.get("ashby_min_score")
+        if min_score:
+            params["minScore"] = str(min_score)
+        department = self.config.get("ashby_department")
+        if department:
+            params["department"] = department
+
         max_pages = self.config.get("ashby_aggregator_max_pages", 2)
         for page_num in range(1, max_pages + 1):
             try:
                 resp = self.page.request.get(
                     AGGREGATOR_API,
-                    params={"search": title, "source": "ashby", "limit": "100", "page": str(page_num)},
+                    params={**params, "page": str(page_num)},
                     timeout=15000,
                 )
                 if not resp.ok:

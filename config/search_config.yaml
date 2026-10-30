@@ -70,6 +70,16 @@ ashby_companies:
 # per title before fit-scoring/exclude-keywords/caps narrow it down.
 ashby_aggregator_max_pages: 2
 
+# Free, server-side relevance filters on the aggregator -- narrow the pool
+# BEFORE downloading or fit-scoring anything, instead of spending LLM calls
+# on postings that are senior-level or low-relevance by the aggregator's
+# own keyword scoring. Verified live: exp alone cut a 3,975-match search to
+# 811; adding minScore+department brought it to 574, with the right
+# entry-level postings surfacing at the top.
+ashby_exp_filter: true          # map resume years_of_experience to the API's own experience bucket
+ashby_min_score: 20             # 0-1000ish, the aggregator's own composite relevance score; omit/0 = no filter
+ashby_department: "Engineering" # omit/"" = no department filter
+
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
 # "reasonable" figure for salary/notice-period questions, which you may not want.
