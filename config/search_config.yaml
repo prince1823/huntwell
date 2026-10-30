@@ -68,7 +68,7 @@ ashby_companies:
 # aggregator (jobs.whatrunsindia.com) -- 100 is the API's own hard max per
 # request, so this is how to pull more than that. 2 = up to 200 candidates
 # per title before fit-scoring/exclude-keywords/caps narrow it down.
-ashby_aggregator_max_pages: 2
+ashby_aggregator_max_pages: 10  # pull the full relevant pool now that exp/minScore/department filter server-side first
 
 # Free, server-side relevance filters on the aggregator -- narrow the pool
 # BEFORE downloading or fit-scoring anything, instead of spending LLM calls
