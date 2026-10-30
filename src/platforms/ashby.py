@@ -39,6 +39,40 @@ from .base import PlatformAdapter
 JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
 AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
 
+# Matches a location question regardless of how a company phrases it (not
+# just Ashby's own canonical field) -- "Where are you currently based?",
+# "Current location", "Where are you located?", etc. -- so these route
+# through the same safe autocomplete-with-real-profile-data path as
+# _systemfield_location, instead of the generic combobox branch, which
+# would otherwise feed it a free-text LLM answer that likely won't match
+# any real geo-autocomplete suggestion.
+LOCATION_QUESTION_RE = re.compile(
+    r"current(ly)?\s+(location|based)|where.*(located|based)|\bcity\b", re.I
+)
+
+MONTH_NAME_TO_NUM = {
+    "january": "1", "february": "2", "march": "3", "april": "4", "may": "5", "june": "6",
+    "july": "7", "august": "8", "september": "9", "october": "10", "november": "11", "december": "12",
+}
+
+
+def _parse_month_year(date_str: str) -> tuple[str | None, str | None]:
+    """Parse a free-text date like "May 2025" into (month_num, year) for
+    Ashby's Month/Year select dropdowns. Returns (None, None) if it can't
+    be confidently parsed -- leaving the field blank is safer than
+    guessing a month that isn't actually supported by the resume."""
+    if not date_str:
+        return None, None
+    m = re.search(r"([A-Za-z]+)\s+(\d{4})", date_str)
+    if m:
+        month_num = MONTH_NAME_TO_NUM.get(m.group(1).lower())
+        if month_num:
+            return month_num, m.group(2)
+    y = re.search(r"\b(19|20)\d{2}\b", date_str)
+    if y:
+        return None, y.group(0)
+    return None, None
+
 
 # The aggregator's own known tag vocabulary (confirmed from source:
 # src/config/rules.json "tags" list) -- only these exact values are
@@ -305,10 +339,21 @@ class AshbyAdapter(PlatformAdapter):
                 # to an unrelated real place. A disabled Submit button from a
                 # missed required field becomes needs_review, which is safer
                 # than silently submitting a wrong location.
+            elif field_path == "_systemfield_education_history":
+                self._fill_education_history(entry, profile)
             elif entry.locator("input[type='file']").count() > 0:
                 continue  # optional attachment (e.g. cover letter upload) -- leave blank
             elif entry.locator("[class*='-input-yesno']").count() > 0:
                 self._fill_yesno(entry, job, profile, question, defaults)
+            elif entry.locator("[role='combobox']").count() > 0 and LOCATION_QUESTION_RE.search(question):
+                # Same company, different wording -- "Where are you
+                # currently based?" etc. is still a real location field,
+                # not a free-text question, even though it isn't Ashby's
+                # own canonical _systemfield_location. Route it the same
+                # safe way: real profile data via autocomplete, never a
+                # generated guess that likely won't match a real place.
+                if profile.location:
+                    self._fill_autocomplete(entry, profile.location)
             elif entry.locator("[role='combobox']").count() > 0:
                 answer = self.tailor.answer_screening_question(profile, job, question, defaults)
                 self._fill_autocomplete(entry, answer)
@@ -370,6 +415,42 @@ class AshbyAdapter(PlatformAdapter):
                 options.nth(i).click()
                 return
         input_el.press("Escape")
+
+    def _fill_education_history(self, entry, profile: Profile) -> None:
+        """Ashby's own repeatable Education History widget -- a real system
+        field (_systemfield_education_history), not a custom question, but
+        structurally unlike every other field type (nested School
+        autocomplete + Degree/Field text inputs + Start/End date dropdowns),
+        so it had no handler at all before and silently stayed empty.
+        Fills what the resume actually states; leaves Start Date (and
+        "currently enrolled") untouched since Profile.education has no
+        start date to draw from -- a missed required field surfaces as
+        needs_review, which is safer than inventing one."""
+        if not profile.education:
+            return
+        edu = profile.education[0]
+
+        if edu.school:
+            self._fill_autocomplete(entry, edu.school)
+
+        degree_input = entry.locator("input#_systemfield_education_history-degree")
+        if degree_input.count() > 0 and edu.degree and not (degree_input.input_value() or "").strip():
+            degree_input.fill(edu.degree)
+
+        major_input = entry.locator("input#_systemfield_education_history-major")
+        if major_input.count() > 0 and edu.field and not (major_input.input_value() or "").strip():
+            major_input.fill(edu.field)
+
+        month, year = _parse_month_year(edu.end_date)
+        if year:
+            end_date_selects = entry.locator("#_systemfield_education_history-endDate select")
+            if end_date_selects.count() >= 2:
+                try:
+                    if month:
+                        end_date_selects.nth(0).select_option(value=month)
+                    end_date_selects.nth(1).select_option(value=year)
+                except Exception:
+                    pass  # year outside the dropdown's range, or selector mismatch -- leave unfilled
 
     def _upload_resume(self, entry, profile: Profile) -> None:
         file_input = entry.locator("input[type='file']").first
