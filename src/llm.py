@@ -257,6 +257,16 @@ skill/technology), compute it from the candidate's actual work history:
 Reply with a bare number (e.g. "1"), not a sentence, when the question
 expects a count of years.
 
+If the question asks WHEN you can start / join / be available (earliest
+start date, notice period start, etc.), answer "Immediately" (or
+"Immediately available" if the field expects a short phrase rather than one
+word) rather than computing or guessing a calendar date -- a past job's
+start date in the resume is NOT the answer to this question, and inventing
+a future date isn't grounded in anything real either. If
+`notice_period_days` in DEFAULT ANSWERS is explicitly set to a nonzero
+value, say that instead (e.g. "After a 30-day notice period"), still never
+a specific calendar date.
+
 If the question shows a numeric example (e.g. "Example: 200000") or
 otherwise clearly expects a plain number (salary/CTC, compensation, notice
 period in days, etc.), you MUST reply with a bare number in that same
