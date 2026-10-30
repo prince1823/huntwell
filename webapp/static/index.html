@@ -313,6 +313,10 @@ startBtn.addEventListener('click', async () => {
 
     try {
       const res = await fetch('/api/run', { method: 'POST', body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Could not start this run (HTTP ${res.status})`);
+      }
       const { run_id } = await res.json();
       const es = new EventSource(`/api/stream/${run_id}`);
       es.onmessage = (ev) => {
