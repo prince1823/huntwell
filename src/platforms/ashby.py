@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from ..llm import PROFILE_SLOTS
 from ..models import ApplicationResult, JobPosting, Profile
 from .base import PlatformAdapter
 
@@ -38,17 +39,6 @@ from .base import PlatformAdapter
 
 JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
 AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
-
-# Matches a location question regardless of how a company phrases it (not
-# just Ashby's own canonical field) -- "Where are you currently based?",
-# "Current location", "Where are you located?", etc. -- so these route
-# through the same safe autocomplete-with-real-profile-data path as
-# _systemfield_location, instead of the generic combobox branch, which
-# would otherwise feed it a free-text LLM answer that likely won't match
-# any real geo-autocomplete suggestion.
-LOCATION_QUESTION_RE = re.compile(
-    r"current(ly)?\s+(location|based)|where.*(located|based)|\bcity\b", re.I
-)
 
 MONTH_NAME_TO_NUM = {
     "january": "1", "february": "2", "march": "3", "april": "4", "may": "5", "june": "6",
@@ -325,46 +315,59 @@ class AshbyAdapter(PlatformAdapter):
             label = entry.locator("label.ashby-application-form-question-title")
             question = label.first.inner_text().strip() if label.count() > 0 else ""
 
+            # Ashby's own fixed identifiers for name/email/resume -- a 1:1
+            # mapping, not a phrased "question" that varies by company, so
+            # these stay a direct lookup rather than going through
+            # classification.
             if field_path == "_systemfield_name":
                 self._fill_text(entry, profile.full_name)
             elif field_path == "_systemfield_email":
                 self._fill_text(entry, profile.email)
             elif field_path == "_systemfield_resume":
                 self._upload_resume(entry, profile)
-            elif field_path == "_systemfield_location":
-                if profile.location:
-                    self._fill_autocomplete(entry, profile.location)
-                # else: leave blank rather than feed a non-location string
-                # (e.g. "Remote") into a geo-autocomplete -- it can fuzzy-match
-                # to an unrelated real place. A disabled Submit button from a
-                # missed required field becomes needs_review, which is safer
-                # than silently submitting a wrong location.
-            elif field_path == "_systemfield_education_history":
-                self._fill_education_history(entry, profile)
             elif entry.locator("input[type='file']").count() > 0:
                 continue  # optional attachment (e.g. cover letter upload) -- leave blank
             elif entry.locator("[class*='-input-yesno']").count() > 0:
                 self._fill_yesno(entry, job, profile, question, defaults)
-            elif entry.locator("[role='combobox']").count() > 0 and LOCATION_QUESTION_RE.search(question):
-                # Same company, different wording -- "Where are you
-                # currently based?" etc. is still a real location field,
-                # not a free-text question, even though it isn't Ashby's
-                # own canonical _systemfield_location. Route it the same
-                # safe way: real profile data via autocomplete, never a
-                # generated guess that likely won't match a real place.
-                if profile.location:
-                    self._fill_autocomplete(entry, profile.location)
+            elif self._is_structured_group(entry, field_path):
+                # Any repeatable/structured field group -- Education History
+                # today, possibly a "Work History" or similar in the future
+                # on some other company's form -- detected generically by
+                # having its own nested sub-fields (each with their own
+                # label), not hardcoded to one specific field_path. Each
+                # sub-field is classified and filled the same way a
+                # top-level field would be.
+                self._fill_structured_group(entry, job, profile, defaults)
             elif entry.locator("[role='combobox']").count() > 0:
-                answer = self.tailor.answer_screening_question(profile, job, question, defaults)
-                self._fill_autocomplete(entry, answer)
+                self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="combobox")
             elif entry.locator("textarea").count() > 0:
                 self._fill_textarea(entry, job, profile, question, defaults)
-            elif entry.locator("input[type='text'], input[type='email']").count() > 0:
-                answer = self.tailor.answer_screening_question(profile, job, question, defaults)
-                self._fill_text(entry, answer)
+            elif entry.locator("input[type='text'], input[type='email'], input[type='tel']").count() > 0:
+                self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="text")
+
+    def _fill_known_or_freeform(
+        self, entry, question: str, job: JobPosting, profile: Profile, defaults: dict, widget: str
+    ) -> None:
+        """Classify the question against real profile facts (PROFILE_SLOTS)
+        regardless of how it's phrased -- "Where are you currently based?",
+        "Current location", "City" all resolve to the same "location" slot
+        and get the SAME real value, instead of each needing its own
+        hardcoded pattern. Falls back to a generated free-text answer only
+        when the question genuinely isn't asking for one of those exact
+        facts. This matters most for combobox/autocomplete fields, where a
+        generated answer that doesn't exactly match a real suggestion
+        silently fails to select anything."""
+        slot = self.tailor.classify_field(question)
+        value = PROFILE_SLOTS[slot](profile) if slot != "freeform" else ""
+        if slot == "freeform" or not value:
+            value = self.tailor.answer_screening_question(profile, job, question, defaults)
+        if widget == "combobox":
+            self._fill_autocomplete(entry, value)
+        else:
+            self._fill_text(entry, value)
 
     def _fill_text(self, entry, value: str) -> None:
-        input_el = entry.locator("input[type='text'], input[type='email']").first
+        input_el = entry.locator("input[type='text'], input[type='email'], input[type='tel']").first
         if (input_el.input_value() or "").strip():
             return
         input_el.fill(value or "")
@@ -416,41 +419,74 @@ class AshbyAdapter(PlatformAdapter):
                 return
         input_el.press("Escape")
 
-    def _fill_education_history(self, entry, profile: Profile) -> None:
-        """Ashby's own repeatable Education History widget -- a real system
-        field (_systemfield_education_history), not a custom question, but
-        structurally unlike every other field type (nested School
-        autocomplete + Degree/Field text inputs + Start/End date dropdowns),
-        so it had no handler at all before and silently stayed empty.
-        Fills what the resume actually states; leaves Start Date (and
-        "currently enrolled") untouched since Profile.education has no
-        start date to draw from -- a missed required field surfaces as
-        needs_review, which is safer than inventing one."""
-        if not profile.education:
-            return
-        edu = profile.education[0]
+    def _is_structured_group(self, entry, field_path: str) -> bool:
+        """A field entry is a repeatable/structured group (Education History
+        today, possibly a "Work History" or similar on some other
+        company's form tomorrow) if it contains more than one of its OWN
+        nested sub-field labels, not just the group's own top-level
+        heading label -- detected structurally, not by hardcoding this
+        one field_path."""
+        sub_labels = entry.locator("label.ashby-application-form-question-title")
+        count = sub_labels.count()
+        if count <= 1:
+            return False
+        own_heading = 1 if field_path and entry.locator(f"label[for='{field_path}']").count() > 0 else 0
+        return (count - own_heading) > 1
 
-        if edu.school:
-            self._fill_autocomplete(entry, edu.school)
+    def _fill_structured_group(self, entry, job: JobPosting, profile: Profile, defaults: dict) -> None:
+        """Generic handler for any structured field group: reads its own
+        nested sub-fields by their own labels/ids instead of hardcoding
+        one widget's shape (e.g. Education History's School/Degree/Field/
+        Dates), classifies each sub-question against PROFILE_SLOTS the
+        same way a top-level field would be, and fills it with the real
+        value using whatever widget that sub-field turns out to be (text,
+        autocomplete, or a month+year date-select pair). A sub-field that
+        doesn't map to any real profile data (e.g. a Start Date the
+        resume doesn't state) is left blank rather than guessed."""
+        field_path = entry.get_attribute("data-field-path") or ""
+        sub_labels = entry.locator("label.ashby-application-form-question-title")
+        group_label = entry.locator(f"label[for='{field_path}']") if field_path else None
+        group_heading = group_label.first.inner_text().strip() if group_label and group_label.count() > 0 else ""
 
-        degree_input = entry.locator("input#_systemfield_education_history-degree")
-        if degree_input.count() > 0 and edu.degree and not (degree_input.input_value() or "").strip():
-            degree_input.fill(edu.degree)
+        for i in range(sub_labels.count()):
+            label_el = sub_labels.nth(i)
+            for_attr = label_el.get_attribute("for") or ""
+            if not for_attr or for_attr == field_path:
+                continue  # the group's own heading label, not a real sub-field
+            sub_question = label_el.inner_text().strip()
+            # A bare sub-label like "End Date" is ambiguous on its own (end
+            # of what?) -- give the classifier the group's own heading for
+            # context, same as a human reading the form would have.
+            classify_question = f"{group_heading}: {sub_question}" if group_heading else sub_question
+            slot = self.tailor.classify_field(classify_question)
+            value = PROFILE_SLOTS[slot](profile) if slot != "freeform" else ""
 
-        major_input = entry.locator("input#_systemfield_education_history-major")
-        if major_input.count() > 0 and edu.field and not (major_input.input_value() or "").strip():
-            major_input.fill(edu.field)
+            # Date sub-fields render as a pair of <select> under a
+            # container with this id, not a single input.
+            date_selects = entry.locator(f"#{for_attr} select")
+            if date_selects.count() >= 2:
+                month, year = _parse_month_year(value)
+                if year:
+                    try:
+                        if month:
+                            date_selects.nth(0).select_option(value=month)
+                        date_selects.nth(1).select_option(value=year)
+                    except Exception:
+                        pass  # year outside the dropdown's range -- leave unfilled
+                continue
 
-        month, year = _parse_month_year(edu.end_date)
-        if year:
-            end_date_selects = entry.locator("#_systemfield_education_history-endDate select")
-            if end_date_selects.count() >= 2:
-                try:
-                    if month:
-                        end_date_selects.nth(0).select_option(value=month)
-                    end_date_selects.nth(1).select_option(value=year)
-                except Exception:
-                    pass  # year outside the dropdown's range, or selector mismatch -- leave unfilled
+            text_input = entry.locator(f"input#{for_attr}")
+            if text_input.count() > 0:
+                if value and not (text_input.first.input_value() or "").strip():
+                    text_input.first.fill(value)
+                continue
+
+            # No id'd input matched -- an autocomplete/combobox sub-field
+            # (e.g. School) that doesn't expose a plain id the same way.
+            # _fill_autocomplete scoped to the whole group entry finds the
+            # one nested combobox, same as it would at the top level.
+            if value:
+                self._fill_autocomplete(entry, value)
 
     def _upload_resume(self, entry, profile: Profile) -> None:
         file_input = entry.locator("input[type='file']").first
@@ -472,8 +508,8 @@ class AshbyAdapter(PlatformAdapter):
                 continue
             question = label.first.inner_text().strip()
 
-            if entry.locator("input[type='text'], input[type='email']").count() > 0:
-                val = entry.locator("input[type='text'], input[type='email']").first.input_value()
+            if entry.locator("input[type='text'], input[type='email'], input[type='tel']").count() > 0:
+                val = entry.locator("input[type='text'], input[type='email'], input[type='tel']").first.input_value()
                 if not (val or "").strip():
                     missing.append(question)
             elif entry.locator("textarea").count() > 0:

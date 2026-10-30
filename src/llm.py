@@ -7,6 +7,34 @@ from .cache import DEFAULT_CACHE_DIR, JSONCache
 from .models import JobPosting, Profile
 from .openrouter import MODEL, get_client
 
+# Real, structured facts a form field can ask for, each with a getter that
+# pulls the actual value straight from the parsed resume -- never generated
+# text. This is what makes classify_field() safe rather than just clever:
+# a field that's recognized as asking for one of these gets REAL data,
+# regardless of how the question is phrased, instead of a free-text AI
+# answer that an autocomplete/combobox might not be able to match to a
+# real suggestion.
+PROFILE_SLOTS: dict[str, "callable"] = {
+    "full_name": lambda p: p.full_name,
+    "email": lambda p: p.email,
+    "phone": lambda p: p.phone,
+    "location": lambda p: p.location,
+    "linkedin_url": lambda p: p.linkedin_url,
+    "portfolio_url": lambda p: p.portfolio_url,
+    "school": lambda p: p.education[0].school if p.education else "",
+    "degree": lambda p: p.education[0].degree if p.education else "",
+    "field_of_study": lambda p: p.education[0].field if p.education else "",
+    "graduation_date": lambda p: p.education[0].end_date if p.education else "",
+    "current_company": lambda p: next(
+        (e.company for e in p.experience if e.end_date.strip().lower() == "present"),
+        p.experience[0].company if p.experience else "",
+    ),
+    "current_job_title": lambda p: next(
+        (e.title for e in p.experience if e.end_date.strip().lower() == "present"),
+        p.experience[0].title if p.experience else "",
+    ),
+}
+
 
 class Tailor:
     """Wraps LLM calls for fit scoring, cover letters, and screening-question
@@ -340,6 +368,44 @@ JOB DESCRIPTION:
             score = 0.5
         self.cache.set(key, score)
         return score
+
+    def classify_field(self, question: str) -> str:
+        """Classify a form field's question against PROFILE_SLOTS so it can be
+        filled with real resume data, regardless of how a given company
+        phrases it ("Where are you currently based?" / "Current location" /
+        "City" all resolve to the same "location" slot). Returns "freeform"
+        for anything that doesn't map to a known real fact (open-ended
+        questions, yes/no questions, salary, years of experience, etc.) --
+        those still go through answer_screening_question as before.
+
+        Cached on the question text alone, not the job or profile -- the
+        classification itself doesn't depend on either (the same phrasing
+        means the same slot for every company and every candidate), so this
+        also means a phrasing seen once is never re-classified again."""
+        key = JSONCache.make_key("classify_field", question.strip().lower())
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+
+        slots = ", ".join(PROFILE_SLOTS.keys())
+        prompt = f"""Does this job application form question ask for one of these specific,
+literal facts about a candidate: {slots}?
+
+Reply with ONLY the single matching name from that list, or "freeform" if the
+question asks for anything else -- including yes/no questions, salary/CTC,
+years of experience, visa/sponsorship/relocation questions, or any
+open-ended/behavioral question. Only match a slot if the question is
+unambiguously and specifically asking for that exact fact.
+
+QUESTION: {question}
+"""
+        resp = self.client.chat.completions.create(
+            model=MODEL, max_tokens=20, messages=[{"role": "user", "content": prompt}]
+        )
+        answer = resp.choices[0].message.content.strip().lower().strip('."')
+        result = answer if answer in PROFILE_SLOTS else "freeform"
+        self.cache.set(key, result)
+        return result
 
     def suggest_search_titles(self, profile: Profile, max_titles: int = 5) -> list[str]:
         """Return a short list of job titles to search for on LinkedIn/Wellfound/Ashby,
