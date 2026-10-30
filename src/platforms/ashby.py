@@ -40,6 +40,34 @@ JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
 AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
 
 
+# The aggregator's own known tag vocabulary (confirmed from source:
+# src/config/rules.json "tags" list) -- only these exact values are
+# meaningful to its match filter, so resume skills get matched against
+# this list rather than sent as-is.
+KNOWN_TAGS = [
+    "golang", "rust", "java", "kotlin", "scala", "ruby", "rails", "php", "elixir",
+    "next.js", "vue", "angular", "svelte", "django", "fastapi", "spring boot", "graphql",
+    "aws", "gcp", "azure", "kubernetes", "terraform", "docker",
+    "postgres", "kafka", "spark", "snowflake", "airflow",
+    "pytorch", "tensorflow", "llm", "solidity",
+]
+
+
+def _skill_match_param(skills: list[str]) -> str:
+    """Match the resume's own skills against the aggregator's known tag
+    vocabulary (case-insensitive) so the search narrows to postings
+    mentioning the candidate's actual tech stack, not just title text.
+    Uses the "match" query param, not "tags" -- confirmed live those are
+    NOT equivalent: "tags" requires every listed tag to co-occur on the
+    same posting (AND), which collapses to ~0 results once combined with
+    location/exp/minScore; "match" is the loose/OR-style equivalent (e.g.
+    4 skills under "tags" gave 1 result combined with other filters,
+    the same 4 under "match" gave 20)."""
+    skills_lower = {s.lower() for s in skills}
+    matched = [tag for tag in KNOWN_TAGS if tag in skills_lower]
+    return ",".join(matched)
+
+
 def _experience_param(years: int) -> str | None:
     """Map resume years_of_experience to the aggregator's own exp filter
     (confirmed from source: "1"=jobs wanting <=1yr, "2"=<=3yr, "5"=<=6yr --
@@ -110,6 +138,18 @@ class AshbyAdapter(PlatformAdapter):
         department = self.config.get("ashby_department")
         if department:
             params["department"] = department
+        location = self.config.get("ashby_location")
+        if location:
+            params["location"] = location
+        # Off by default -- stacked with location+exp+minScore, skill
+        # matching narrows the pool to near-zero (verified live: 11 results
+        # for one title with just location+exp+minScore, down to 2 once
+        # skill-match was added on top). Available for anyone who wants
+        # tighter-but-much-smaller-volume matching.
+        if self.config.get("ashby_tags_filter", False):
+            match_param = _skill_match_param(profile.skills)
+            if match_param:
+                params["match"] = match_param
 
         max_pages = self.config.get("ashby_aggregator_max_pages", 2)
         for page_num in range(1, max_pages + 1):

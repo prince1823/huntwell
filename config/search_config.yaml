@@ -79,6 +79,8 @@ ashby_aggregator_max_pages: 10  # pull the full relevant pool now that exp/minSc
 ashby_exp_filter: true          # map resume years_of_experience to the API's own experience bucket
 ashby_min_score: 20             # 0-1000ish, the aggregator's own composite relevance score; omit/0 = no filter
 ashby_department: "Engineering" # omit/"" = no department filter
+ashby_location: "India"         # omit/"" = no location filter
+ashby_tags_filter: false      # off by default -- too restrictive stacked with location+exp+minScore
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
