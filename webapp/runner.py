@@ -28,6 +28,28 @@ ADAPTERS = {
     "indeed": IndeedAdapter,
 }
 
+
+def _emit(events: queue.Queue, event: dict) -> None:
+    """Put an event on the SSE queue AND print it to the server's own
+    stdout (captured in the uvicorn log). Every event here used to go
+    ONLY to the browser -- real progress (platform_start, search result
+    counts, each job's duplicate/skipped/applied outcome) was genuinely
+    being produced the whole time, but was invisible outside the browser
+    tab, which is why a silent-looking run gave no way to tell "it found
+    nothing" apart from "something's actually wrong" after the fact."""
+    events.put(event)
+    etype = event.get("type", "")
+    platform = event.get("platform", "")
+    if etype == "platform_search":
+        print(f"[{platform}] found {event.get('count')} candidate postings")
+    elif etype == "result":
+        fit = event.get("fit")
+        fit_str = f"{fit:.2f}" if isinstance(fit, (int, float)) else "n/a"
+        print(f"[{platform}] {event.get('status')} (fit {fit_str}): {event.get('title')} @ {event.get('company')}"
+              + (f" -- {event.get('reason')}" if event.get("reason") else ""))
+    elif etype in ("platform_start", "platform_error", "platform_skipped", "platform_done"):
+        print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""))
+
 RUN_PLATFORMS = ["linkedin", "wellfound", "ashby"]  # indeed excluded -- see README
 
 
@@ -57,14 +79,14 @@ def run_pipeline(
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            events.put({"type": "error", "message": "ANTHROPIC_API_KEY not set in .env"})
-            events.put({"type": "done"})
+            _emit(events, {"type": "error", "message": "ANTHROPIC_API_KEY not set in .env"})
+            _emit(events, {"type": "done"})
             return
 
-        events.put({"type": "step", "step": 1, "label": "Extracting information from resume"})
+        _emit(events, {"type": "step", "step": 1, "label": "Extracting information from resume"})
         profile = parse_resume(str(resume_path), api_key, cache_dir=paths.cache_dir)
         profile = apply_profile_overrides(profile_name, profile)
-        events.put(
+        _emit(events, 
             {
                 "type": "profile",
                 "name": profile.full_name,
@@ -74,7 +96,7 @@ def run_pipeline(
             }
         )
 
-        events.put({"type": "step", "step": 2, "label": "Scoring postings and tailoring answers with AI"})
+        _emit(events, {"type": "step", "step": 2, "label": "Scoring postings and tailoring answers with AI"})
         tailor = Tailor(api_key, cache_dir=paths.cache_dir)
         cfg = _load_config(paths.config_path)
 
@@ -87,13 +109,13 @@ def run_pipeline(
             suggested_titles = tailor.suggest_search_titles(profile)
             if suggested_titles:
                 cfg["titles"] = suggested_titles
-                events.put({"type": "search_titles", "titles": suggested_titles})
+                _emit(events, {"type": "search_titles", "titles": suggested_titles})
 
-        events.put({"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
+        _emit(events, {"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
         threads = []
         for platform in RUN_PLATFORMS:
             if not cfg.get("platforms", {}).get(platform, False):
-                events.put({"type": "platform_skipped", "platform": platform, "message": "disabled in config"})
+                _emit(events, {"type": "platform_skipped", "platform": platform, "message": "disabled in config"})
                 continue
             # Each thread opens its own Tracker/sqlite3 connection -- a
             # connection object can't be shared across threads (Python's
@@ -112,9 +134,9 @@ def run_pipeline(
     except Exception as e:  # noqa: BLE001 -- surface any crash to the UI instead of hanging it
         print("[run_pipeline] CRASHED:")
         traceback.print_exc()
-        events.put({"type": "error", "message": str(e)})
+        _emit(events, {"type": "error", "message": str(e)})
     finally:
-        events.put({"type": "done"})
+        _emit(events, {"type": "done"})
 
 
 def _run_one_platform(
@@ -133,25 +155,25 @@ def _run_one_platform(
         platform, config.get("max_applications_per_platform_per_day", 20)
     )
 
-    events.put({"type": "platform_start", "platform": platform})
+    _emit(events, {"type": "platform_start", "platform": platform})
 
     tracker = Tracker(str(db_path))
     already_today = tracker.count_applied_today(platform)
     if already_today >= daily_cap:
-        events.put({"type": "platform_error", "platform": platform, "message": f"Daily cap ({daily_cap}) already reached"})
-        events.put({"type": "platform_done", "platform": platform})
+        _emit(events, {"type": "platform_error", "platform": platform, "message": f"Daily cap ({daily_cap}) already reached"})
+        _emit(events, {"type": "platform_done", "platform": platform})
         tracker.close()
         return
 
     if not state_file.exists() and adapter_cls.requires_login:
-        events.put(
+        _emit(events, 
             {
                 "type": "platform_error",
                 "platform": platform,
                 "message": "No saved login session -- run the CLI once with --no-headless to log in first.",
             }
         )
-        events.put({"type": "platform_done", "platform": platform})
+        _emit(events, {"type": "platform_done", "platform": platform})
         tracker.close()
         return
 
@@ -164,15 +186,15 @@ def _run_one_platform(
             try:
                 adapter.ensure_logged_in("", "", headless=True)
             except RuntimeError as e:
-                events.put({"type": "platform_error", "platform": platform, "message": str(e)})
+                _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
                 browser.close()
-                events.put({"type": "platform_done", "platform": platform})
+                _emit(events, {"type": "platform_done", "platform": platform})
                 return
             if adapter_cls.requires_login:
                 context.storage_state(path=str(state_file))
 
             postings = adapter.search_jobs(profile)
-            events.put({"type": "platform_search", "platform": platform, "count": len(postings)})
+            _emit(events, {"type": "platform_search", "platform": platform, "count": len(postings)})
 
             applied_count = already_today
             for job in postings:
@@ -185,7 +207,7 @@ def _run_one_platform(
                     # distinctly (not lumped into generic "skipped") so it's
                     # clear *why* nothing new happened, instead of it
                     # looking like the pipeline silently did nothing.
-                    events.put(
+                    _emit(events, 
                         {
                             "type": "result",
                             "platform": platform,
@@ -209,7 +231,7 @@ def _run_one_platform(
                     # applying..." forever with no further events, which
                     # reads as stuck/broken even though the filtering is
                     # correct and intentional.
-                    events.put(
+                    _emit(events, 
                         {
                             "type": "result",
                             "platform": platform,
@@ -226,7 +248,7 @@ def _run_one_platform(
 
                 fit = tailor.score_fit(profile, job)
                 if fit < min_fit_score:
-                    events.put(
+                    _emit(events, 
                         {
                             "type": "result",
                             "platform": platform,
@@ -250,7 +272,7 @@ def _run_one_platform(
                 if result.status == "applied":
                     applied_count += 1
 
-                events.put(
+                _emit(events, 
                     {
                         "type": "result",
                         "platform": platform,
@@ -277,7 +299,7 @@ def _run_one_platform(
         # instead of invisible.
         print(f"[{platform}] CRASHED:")
         traceback.print_exc()
-        events.put({"type": "platform_error", "platform": platform, "message": str(e)})
+        _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
     finally:
         tracker.close()
-        events.put({"type": "platform_done", "platform": platform})
+        _emit(events, {"type": "platform_done", "platform": platform})
