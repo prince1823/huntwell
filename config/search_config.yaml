@@ -23,20 +23,17 @@ locations:
 
 keywords_include: []     # postings must contain at least one (empty = no filter)
 keywords_exclude:        # postings whose TITLE contains any of these are skipped before scoring
-  - "Senior Staff"
   - "Clearance Required"
-  # Wellfound has no native experience-level search filter (unlike LinkedIn's
-  # f_E param), so seniority mismatches are filtered by title keyword instead
-  # of by search itself -- fit-scoring still catches senior-sounding titles
-  # that slip through without one of these exact words.
-  - "Senior"
-  - "Staff"
-  - "Principal"
-  - "Lead"
-  - "Director"
-  - "Head of"
-  - "VP "
-  - "Manager"
+  # Seniority terms (Senior/Staff/Principal/Lead/Director/Head of/VP/Manager)
+  # used to live here as a global title-substring backstop, but were removed
+  # 2026-10-30: Ashby now has its own server-side exp filter, LinkedIn
+  # already has its own f_E param, and the substring match itself had a real
+  # false-positive problem -- confirmed live it wrongly excluded genuinely
+  # entry-level postings like "Member of Technical Staff, AI Products
+  # (Early Career)" and "...New Grad (BS/MS)" just because "Staff" matched
+  # as a substring. Wellfound has no server-side experience filter, so it
+  # now relies on fit-scoring alone for seniority -- a known tradeoff if
+  # noise reappears there specifically.
 
 min_salary: 0             # 0 = no filter; only enforced when the platform exposes salary data
 
