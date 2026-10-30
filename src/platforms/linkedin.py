@@ -289,8 +289,20 @@ class LinkedInAdapter(PlatformAdapter):
             submit_btn = dialog.get_by_role("button", name=re.compile("Submit application", re.I))
             if submit_btn.count() > 0:
                 submit_btn.first.click()
-                self.page.wait_for_timeout(1500)
-                return ApplicationResult(job=job, status="applied")
+                self.page.wait_for_timeout(2000)
+                if self._submission_confirmed():
+                    return ApplicationResult(job=job, status="applied")
+                # Clicking Submit is not proof LinkedIn accepted it -- no
+                # confirmation (toast/banner, or the modal actually closing)
+                # means we genuinely don't know whether it went through.
+                # Marking "applied" here with no verification is exactly the
+                # bug a real account hit: DB said applied, LinkedIn showed
+                # not applied. Fail safe to needs_review instead of guessing.
+                return ApplicationResult(
+                    job=job,
+                    status="needs_review",
+                    reason="Clicked Submit but could not confirm LinkedIn accepted the application",
+                )
 
             unanswered = self._unanswered_required_fields(dialog)
             if unanswered:
@@ -325,6 +337,31 @@ class LinkedInAdapter(PlatformAdapter):
             return dialog.inner_text()[:500]
         except Exception:
             return ""
+
+    def _submission_confirmed(self) -> bool:
+        """Checked right after clicking Submit -- clicking a button is not
+        proof LinkedIn accepted the application. Two independent signals,
+        either one counts as confirmed: (1) a visible confirmation message
+        (LinkedIn's own post-submit screen/toast says "application was
+        sent" or similar), or (2) the Easy Apply dialog itself closed,
+        which it does on a real successful submit but not when a
+        client-side error keeps it open. NOT verified against a real
+        submission yet (avoided on purpose, to not submit a live test
+        application) -- if this starts producing false needs_review on
+        postings that actually did go through, the signals here need
+        adjusting against a real one."""
+        try:
+            confirmation = self.page.get_by_text(
+                re.compile(r"application (was|has been) sent|your application.{0,20}submitted", re.I)
+            )
+            if confirmation.count() > 0:
+                return True
+        except Exception:
+            pass
+        try:
+            return self.page.locator("dialog").count() == 0
+        except Exception:
+            return False
 
     def _get_description_text(self) -> str:
         columns = self.page.locator("[data-testid='lazy-column']")
