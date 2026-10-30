@@ -84,7 +84,7 @@ ashby_tags_filter: false      # off by default -- too restrictive stacked with l
 # "reasonable" figure for salary/notice-period questions, which you may not want.
 screening_defaults:
   work_authorization: "Yes, I am authorized to work in this country without sponsorship."
-  willing_to_relocate: "No"
+  willing_to_relocate: "Yes"
   require_visa_sponsorship: "No"
   current_ctc_inr: ""           # e.g. "600000" -- leave blank to let the agent estimate
   expected_ctc_inr: ""          # e.g. "900000"
