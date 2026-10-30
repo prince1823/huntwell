@@ -47,9 +47,9 @@ max_applications_per_platform_per_day: 10  # default/fallback for any platform n
 # Per-platform overrides -- higher volume on one platform doesn't have to
 # mean higher volume (and higher ban risk) on another.
 max_applications_per_day:
-  linkedin: 80
-  wellfound: 80
-  ashby: 80
+  linkedin: 3000
+  wellfound: 3000
+  ashby: 3000
 
 platforms:
   linkedin: true
