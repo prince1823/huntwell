@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import queue
 import threading
+import traceback
 from pathlib import Path
 
 import yaml
@@ -109,6 +110,8 @@ def run_pipeline(
         for t in threads:
             t.join()
     except Exception as e:  # noqa: BLE001 -- surface any crash to the UI instead of hanging it
+        print("[run_pipeline] CRASHED:")
+        traceback.print_exc()
         events.put({"type": "error", "message": str(e)})
     finally:
         events.put({"type": "done"})
@@ -265,6 +268,15 @@ def _run_one_platform(
                 context.storage_state(path=str(state_file))
             browser.close()
     except Exception as e:  # noqa: BLE001 -- one platform crashing shouldn't hang the UI
+        # Only the short message reaches the UI (SSE event, nothing
+        # persisted) -- this was the actual silent-failure gap: a real
+        # crash here (e.g. Wellfound/Ashby producing zero results with no
+        # visible error) left no trace anywhere to diagnose from
+        # afterward. Print the full traceback to the server's own stdout
+        # (captured in the uvicorn log) so a repeat is actually diagnosable
+        # instead of invisible.
+        print(f"[{platform}] CRASHED:")
+        traceback.print_exc()
         events.put({"type": "platform_error", "platform": platform, "message": str(e)})
     finally:
         tracker.close()
