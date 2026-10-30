@@ -14,11 +14,15 @@ def apply_profile_overrides(profile_name: str | None, profile: Profile) -> Profi
     given us directly (e.g. a LinkedIn URL, a preferred work location) from
     profiles/<name>/profile_overrides.yaml, instead of guessing or leaving
     application forms blocked. Only overrides fields the file explicitly sets;
-    everything else stays exactly as the resume parsed."""
-    if not profile_name:
-        return profile
+    everything else stays exactly as the resume parsed.
 
-    overrides_path = ROOT / "profiles" / profile_name / "profile_overrides.yaml"
+    profile_name=None (the root/default account) reads profile_overrides.yaml
+    at the project root instead -- same mechanism, same file format, just not
+    nested under profiles/ since there's no named-profile directory for it."""
+    overrides_path = (
+        ROOT / "profile_overrides.yaml" if not profile_name
+        else ROOT / "profiles" / profile_name / "profile_overrides.yaml"
+    )
     if not overrides_path.exists():
         return profile
 

@@ -32,7 +32,14 @@ Return ONLY a JSON object matching this schema, no prose, no markdown fences:
   "full_name": str,
   "email": str,
   "phone": str,
-  "location": str,
+  "location": str,          // the candidate's current city, inferred from any real
+                             // signal in the resume -- an explicit address/location
+                             // line, the city listed on their most recent job, or
+                             // their most recent university's city if no work
+                             // location is given. Prefer the most recent/current
+                             // signal over an older one. If the resume gives no
+                             // location signal of any kind, use "" -- never invent
+                             // a city that isn't actually supported by the text.
   "linkedin_url": str,
   "portfolio_url": str,
   "headline": str,          // the candidate's current professional identity/target

@@ -57,7 +57,13 @@ def resolve_profile_paths(
         state_dir.mkdir(exist_ok=True)
         cache_dir = DEFAULT_CACHE_DIR
         db_path = Path(db_arg) if db_arg else ROOT / "applications.db"
-        config_path = config_arg
+
+        # Same override pattern as a named profile's search_config.yaml, but
+        # at the project root since there's no profiles/<name>/ directory
+        # for the root account -- lets the root account pin its own search
+        # locations etc. without editing the shared default config.
+        root_config = ROOT / "search_config.yaml"
+        config_path = root_config if (config_arg == DEFAULT_CONFIG_PATH and root_config.exists()) else config_arg
 
     return ProfilePaths(
         profile_name=profile_name,
