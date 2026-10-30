@@ -41,14 +41,14 @@ def _emit(events: queue.Queue, event: dict) -> None:
     etype = event.get("type", "")
     platform = event.get("platform", "")
     if etype == "platform_search":
-        print(f"[{platform}] found {event.get('count')} candidate postings")
+        print(f"[{platform}] found {event.get('count')} candidate postings", flush=True)
     elif etype == "result":
         fit = event.get("fit")
         fit_str = f"{fit:.2f}" if isinstance(fit, (int, float)) else "n/a"
         print(f"[{platform}] {event.get('status')} (fit {fit_str}): {event.get('title')} @ {event.get('company')}"
-              + (f" -- {event.get('reason')}" if event.get("reason") else ""))
+              + (f" -- {event.get('reason')}" if event.get("reason") else ""), flush=True)
     elif etype in ("platform_start", "platform_error", "platform_skipped", "platform_done"):
-        print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""))
+        print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""), flush=True)
 
 RUN_PLATFORMS = ["linkedin", "wellfound", "ashby"]  # indeed excluded -- see README
 
@@ -297,7 +297,7 @@ def _run_one_platform(
         # afterward. Print the full traceback to the server's own stdout
         # (captured in the uvicorn log) so a repeat is actually diagnosable
         # instead of invisible.
-        print(f"[{platform}] CRASHED:")
+        print(f"[{platform}] CRASHED:", flush=True)
         traceback.print_exc()
         _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
     finally:
