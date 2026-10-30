@@ -64,17 +64,41 @@ class AshbyAdapter(PlatformAdapter):
 
     def _search_aggregator(self, title: str, seen_ids: set[str]) -> list[JobPosting]:
         postings: list[JobPosting] = []
-        try:
-            resp = self.page.request.get(
-                AGGREGATOR_API,
-                params={"q": title, "source": "ashby", "limit": "50"},
-                timeout=15000,
-            )
-            if not resp.ok:
-                return []
-            data = resp.json().get("data", [])
-        except Exception:
-            return []
+        # The aggregator's query param is "search", not "q" -- confirmed
+        # live against the actual route source (web/app/api/jobs/route.ts
+        # only reads sp.get('search')). Sending "q" was silently ignored,
+        # which meant every title search was returning the exact same
+        # generic top-scored feed regardless of what was actually searched
+        # for -- confirmed live: "AI Engineer" and "HR Coordinator" with "q"
+        # returned identical results; with "search" they're genuinely
+        # different (17,272 vs 361 matches, real on-topic titles).
+        #
+        # MAX_LIMIT is a hard server-side cap (confirmed from source: 100),
+        # requesting more does nothing -- pagination (the "page" param) is
+        # how to get past it, so this pulls up to max_pages of 100 each.
+        max_pages = self.config.get("ashby_aggregator_max_pages", 2)
+        for page_num in range(1, max_pages + 1):
+            try:
+                resp = self.page.request.get(
+                    AGGREGATOR_API,
+                    params={"search": title, "source": "ashby", "limit": "100", "page": str(page_num)},
+                    timeout=15000,
+                )
+                if not resp.ok:
+                    break
+                payload = resp.json()
+                data = payload.get("data", [])
+            except Exception:
+                break
+            if not data:
+                break
+            postings.extend(self._parse_aggregator_items(data, seen_ids))
+            if page_num >= payload.get("totalPages", 1):
+                break
+        return postings
+
+    def _parse_aggregator_items(self, data: list[dict], seen_ids: set[str]) -> list[JobPosting]:
+        postings: list[JobPosting] = []
 
         for item in data:
             job_id = item.get("jobId") or ""

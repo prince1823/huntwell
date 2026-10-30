@@ -64,6 +64,12 @@ platforms:
 ashby_companies:
   - "ashby"
 
+# How many pages of 100 results to pull per search title from the job
+# aggregator (jobs.whatrunsindia.com) -- 100 is the API's own hard max per
+# request, so this is how to pull more than that. 2 = up to 200 candidates
+# per title before fit-scoring/exclude-keywords/caps narrow it down.
+ashby_aggregator_max_pages: 2
+
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
 # "reasonable" figure for salary/notice-period questions, which you may not want.
