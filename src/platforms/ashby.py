@@ -299,8 +299,20 @@ class AshbyAdapter(PlatformAdapter):
             )
 
         submit_btn.first.click()
-        self.page.wait_for_timeout(2000)
-        return ApplicationResult(job=job, status="applied")
+        self.page.wait_for_timeout(2500)
+        if self._submission_confirmed(entries):
+            return ApplicationResult(job=job, status="applied")
+        # Clicking Submit is not proof Ashby accepted it -- same bug class
+        # already found and fixed on LinkedIn. Ashby's guest-apply forms
+        # have no account to check "did I already apply" against later
+        # (revisiting the URL just shows a blank form regardless), so this
+        # is the ONLY point where real confirmation can be checked at all.
+        # Fail safe to needs_review instead of guessing.
+        return ApplicationResult(
+            job=job,
+            status="needs_review",
+            reason="Clicked Submit but could not confirm Ashby accepted the application",
+        )
 
     def _fill_entries(self, entries, job: JobPosting, profile: Profile) -> None:
         defaults = self.config.get("screening_defaults", {})
@@ -398,6 +410,33 @@ class AshbyAdapter(PlatformAdapter):
             if btn.get_attribute("data-option") == target_option:
                 btn.click()
                 return
+
+    def _submission_confirmed(self, entries) -> bool:
+        """Checked right after clicking Submit -- clicking the button is not
+        proof Ashby accepted the application. Two independent signals,
+        either counts as confirmed: (1) a visible confirmation message
+        (Ashby's own post-submit text says the application was "submitted"/
+        "received"/a "thank you"), or (2) the application form itself is
+        gone -- a successful submit typically replaces the form with a
+        confirmation screen, while a client-side validation error leaves
+        the form (and its fields) still on the page. NOT verified against a
+        guaranteed-successful real submission yet (this project avoids
+        deliberately submitting a real test application just to observe
+        the confirmation text) -- if this starts producing false
+        needs_review on postings that actually did go through, the signals
+        here need adjusting against a confirmed real one."""
+        try:
+            confirmation = self.page.get_by_text(
+                re.compile(r"application (was |has been )?(submitted|received)|thank you for applying", re.I)
+            )
+            if confirmation.count() > 0:
+                return True
+        except Exception:
+            pass
+        try:
+            return entries.count() == 0 or not entries.first.is_visible()
+        except Exception:
+            return False
 
     def _fill_autocomplete(self, entry, value: str) -> None:
         input_el = entry.locator("input[role='combobox'], input._input_d7ago_28").first
