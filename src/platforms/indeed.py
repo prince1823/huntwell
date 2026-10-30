@@ -29,7 +29,7 @@ LOGIN_WAIT_TIMEOUT_MS = 180_000  # 3 minutes to complete login by hand
 class IndeedAdapter(PlatformAdapter):
     name = "indeed"
 
-    def ensure_logged_in(self, email: str, password: str) -> None:
+    def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:
         self.page.goto("https://www.indeed.com/", wait_until="domcontentloaded")
         if self.page.locator("a[href*='/account/logout']").count() > 0:
             return

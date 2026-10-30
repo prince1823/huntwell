@@ -28,12 +28,40 @@ JOB_ID_RE = re.compile(r"^/jobs/(\d+)-")
 class WellfoundAdapter(PlatformAdapter):
     name = "wellfound"
 
-    def ensure_logged_in(self, email: str, password: str) -> None:
+    def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:
         self.page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded")
         if self.page.locator("a[href*='/logout']").count() > 0:
             return
 
         self.page.goto("https://wellfound.com/login", wait_until="domcontentloaded")
+
+        # A genuinely-valid session that this first check missed (page-load
+        # timing) auto-redirects away from /login within a few seconds on
+        # its own -- confirmed live, this exact false alarm has self-resolved
+        # before. Give it a short grace window before concluding the session
+        # really is invalid, instead of treating every false alarm as a real
+        # login requirement.
+        try:
+            self.page.wait_for_function(
+                "() => !window.location.pathname.includes('login')", timeout=8000
+            )
+            self.page.wait_for_timeout(1000)
+            return  # false alarm -- was actually still logged in
+        except PlaywrightTimeoutError:
+            pass
+
+        if headless:
+            # No visible window exists for a human to log into -- waiting
+            # out the full manual-login timeout here just burns 3 minutes
+            # for a login that can never happen. Fail fast with a clear
+            # instruction instead.
+            raise RuntimeError(
+                "Wellfound session has expired or is invalid, and this is running "
+                "headless (e.g. via the web UI) -- there's no visible browser for "
+                "a human to log into. Run the CLI once with --no-headless to "
+                "refresh the login, then headless/web runs will work again."
+            )
+
         click.echo(
             "[wellfound] No valid session found. A browser window is open -- "
             "please log in by hand (email/password or Google), then this "

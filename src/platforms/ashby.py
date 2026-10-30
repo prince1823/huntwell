@@ -110,7 +110,7 @@ class AshbyAdapter(PlatformAdapter):
     name = "ashby"
     requires_login = False
 
-    def ensure_logged_in(self, email: str, password: str) -> None:
+    def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:
         pass  # guest application form, no account needed
 
     def search_jobs(self, profile: Profile) -> list[JobPosting]:

@@ -78,7 +78,7 @@ def run_platform(
         email = os.environ.get(f"{platform.upper()}_EMAIL", "")
         password = os.environ.get(f"{platform.upper()}_PASSWORD", "")
         try:
-            adapter.ensure_logged_in(email, password)
+            adapter.ensure_logged_in(email, password, headless=headless)
         except RuntimeError as e:
             click.echo(f"[{platform}] LOGIN FAILED: {e}")
             browser.close()

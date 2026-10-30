@@ -26,8 +26,14 @@ class PlatformAdapter(ABC):
         self.page = context.new_page()
 
     @abstractmethod
-    def ensure_logged_in(self, email: str, password: str) -> None:
-        """Log in if the stored session (context storage_state) isn't already authenticated."""
+    def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:
+        """Log in if the stored session (context storage_state) isn't already
+        authenticated. headless tells an adapter whose login requires a human
+        (LinkedIn, Wellfound) whether a visible window actually exists for
+        someone to log into -- if headless and the session turns out to be
+        invalid, it should fail immediately with a clear message instead of
+        waiting out the full manual-login timeout for a login nobody can
+        perform."""
 
     @abstractmethod
     def search_jobs(self, profile: Profile) -> list[JobPosting]:

@@ -159,7 +159,7 @@ def _run_one_platform(
             adapter: PlatformAdapter = adapter_cls(context, tailor, config)
 
             try:
-                adapter.ensure_logged_in("", "")
+                adapter.ensure_logged_in("", "", headless=True)
             except RuntimeError as e:
                 events.put({"type": "platform_error", "platform": platform, "message": str(e)})
                 browser.close()
