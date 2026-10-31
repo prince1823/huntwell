@@ -98,6 +98,13 @@ workable_companies:
   - "volga-partners"
   - "workana-premium"
   - "modash"
+  - "lamdax"
+  - "digitals"
+  - "neurohire-dot-a-i"
+  - "enjins"
+  - "keywords-intl1"
+  - "arkham-technologies"
+  - "masterworksco"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
