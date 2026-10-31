@@ -92,6 +92,12 @@ workable_companies:
   - "ottimate"
   - "destinusgroup"
   - "irth-solutions"
+  - "fuseenergy"
+  - "devoted-studios-1"
+  - "portless"
+  - "volga-partners"
+  - "workana-premium"
+  - "modash"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
