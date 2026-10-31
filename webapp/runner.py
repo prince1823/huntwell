@@ -288,6 +288,17 @@ def _run_one_platform(
                     }
                 )
 
+                # Same real gap between separate applications as the CLI
+                # (main.py) -- see its comment for why. 0/0 (the default)
+                # means no delay.
+                delay_cfg = config.get("apply_delay_seconds", {})
+                lo, hi = delay_cfg.get("min", 0), delay_cfg.get("max", 0)
+                if hi > 0:
+                    import random
+                    import time
+
+                    time.sleep(random.uniform(lo, hi))
+
             if adapter_cls.requires_login:
                 context.storage_state(path=str(state_file))
             browser.close()

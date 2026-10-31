@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 from pathlib import Path
 
 import click
@@ -116,6 +117,28 @@ def run_platform(
 
             tracker.record(result)
             click.echo(f"[{platform}]   -> {result.status} {result.reason}")
+
+            # A real gap between separate applications, not a within-form
+            # delay -- confirmed live (2026-10-30/31) that Ashby's and
+            # Workable's confirmation rate collapsed specifically during a
+            # concentrated burst of back-to-back submissions across many
+            # different companies, while the same-day baseline rate (one
+            # every few minutes, not seconds) stayed healthy. Both host
+            # many unrelated companies, so their own anti-bot layer scores
+            # traffic across the whole platform, not per company --
+            # spacing out distinct real submissions is a genuine change in
+            # request volume, not a simulated one. Only applies on
+            # platforms that configure it (guest-apply/CAPTCHA-prone ones);
+            # 0/0 (the default) means no delay.
+            delay_cfg = config.get("apply_delay_seconds", {})
+            lo, hi = delay_cfg.get("min", 0), delay_cfg.get("max", 0)
+            if hi > 0:
+                import time
+
+                delay = random.uniform(lo, hi)
+                click.echo(f"[{platform}] waiting {delay:.0f}s before the next application...")
+                time.sleep(delay)
+
             if result.status == "applied":
                 applied_count += 1
 

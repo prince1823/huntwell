@@ -41,6 +41,14 @@ remote_only: false
 
 max_applications_per_platform_per_day: 10  # default/fallback for any platform not listed below
 
+# A real (random) gap between separate applications -- see main.py's
+# comment at the delay call site for why this helps specifically with
+# Ashby/Workable's CAPTCHA, which confirmed live correlates with burst
+# volume, not daily totals. 0/0 = no delay.
+apply_delay_seconds:
+  min: 30
+  max: 90
+
 # Per-platform overrides -- higher volume on one platform doesn't have to
 # mean higher volume (and higher ban risk) on another.
 max_applications_per_day:
