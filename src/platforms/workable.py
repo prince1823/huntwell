@@ -167,9 +167,21 @@ class WorkableAdapter(PlatformAdapter):
         phone = re.sub(r"^\+\d{1,4}\s*", "", profile.phone or "")
         self._fill_text_by_name("phone", phone)
 
-        file_input = self.page.locator("input[type='file']").first
+        # A richer Workable form can have MORE than one file input -- a
+        # separate optional "Photo" upload before the required "Resume"
+        # one, confirmed live (2026-10-31) on a real posting. Blindly
+        # taking .first picked Photo, leaving the actually-required resume
+        # input empty while silently uploading the resume file to the
+        # wrong (optional) field -- the file-type input isn't marked
+        # type='text'/'email'/'textarea' either, so the missing-required
+        # check didn't catch it. The required attribute is the one
+        # reliable signal common to both the simple one-file-input forms
+        # (Callsign) and this richer multi-file-input one.
+        file_input = self.page.locator("input[type='file'][required]")
+        if file_input.count() == 0:
+            file_input = self.page.locator("input[type='file']")
         if file_input.count() > 0 and profile.resume_pdf_path:
-            file_input.set_input_files(profile.resume_pdf_path)
+            file_input.first.set_input_files(profile.resume_pdf_path)
             self.page.wait_for_timeout(1500)
 
     def _fill_text_by_name(self, name: str, value: str) -> None:
@@ -423,6 +435,16 @@ class WorkableAdapter(PlatformAdapter):
             boxes = fieldset.locator("input[type='radio'], input[type='checkbox']")
             if boxes.count() > 0 and not any(boxes.nth(j).is_checked() for j in range(boxes.count())):
                 missing.append(self._fieldset_question(block) or "unlabeled required question")
+
+        # A required file input (resume) keeps its `required` attribute
+        # until a file is actually attached, then the page's own JS drops
+        # it -- confirmed live (2026-10-31): this is what caught a real
+        # bug where the resume got uploaded to the wrong (optional) file
+        # input on a form with more than one, leaving this one still
+        # required and genuinely empty.
+        required_files = self.page.locator("form input[type='file'][required]")
+        if required_files.count() > 0:
+            missing.append("Resume")
 
         return missing
 
