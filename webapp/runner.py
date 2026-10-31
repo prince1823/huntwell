@@ -16,6 +16,7 @@ from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
 from src.platforms.wellfound import WellfoundAdapter
+from src.platforms.workable import WorkableAdapter
 from src.profile_overrides import apply_profile_overrides
 from src.profile_paths import resolve_profile_paths
 from src.resume_parser import parse_resume
@@ -26,6 +27,7 @@ ADAPTERS = {
     "wellfound": WellfoundAdapter,
     "ashby": AshbyAdapter,
     "indeed": IndeedAdapter,
+    "workable": WorkableAdapter,
 }
 
 
@@ -50,7 +52,7 @@ def _emit(events: queue.Queue, event: dict) -> None:
     elif etype in ("platform_start", "platform_error", "platform_skipped", "platform_done"):
         print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""), flush=True)
 
-RUN_PLATFORMS = ["linkedin", "wellfound", "ashby"]  # indeed excluded -- see README
+RUN_PLATFORMS = ["linkedin", "wellfound", "ashby", "workable"]  # indeed excluded -- see README
 
 
 def _load_config(config_path: Path) -> dict:

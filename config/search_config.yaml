@@ -53,6 +53,7 @@ platforms:
   indeed: false  # Cloudflare blocks even authenticated sessions, see README
   wellfound: true
   ashby: true    # guest apply, no account needed -- see ashby_companies below
+  workable: true # guest apply, no account needed -- see workable_companies below
 
 # Ashby has no cross-company job search -- each company hosts its own
 # careers page at jobs.ashbyhq.com/<slug>. List the company slugs to check
@@ -78,6 +79,19 @@ ashby_min_score: 20             # 0-1000ish, the aggregator's own composite rele
 ashby_department: "Engineering" # omit/"" = no department filter
 ashby_location: "India"         # omit/"" = no location filter
 ashby_tags_filter: false      # off by default -- too restrictive stacked with location+exp+minScore
+
+# Workable also has no cross-company job search, and (unlike Ashby) no
+# known third-party aggregator either -- but it has its own free, keyless
+# public JSON API per company (confirmed live 2026-10-31):
+# apply.workable.com/api/v1/widget/accounts/<slug>?details=true -- the
+# same one that backs Workable's own "jobs widget" embed. List the company
+# slugs to check (find a slug from a company's careers page URL, e.g.
+# apply.workable.com/callsign -> slug is "callsign").
+workable_companies:
+  - "callsign"
+  - "ottimate"
+  - "destinusgroup"
+  - "irth-solutions"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a
