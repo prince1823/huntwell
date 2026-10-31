@@ -208,6 +208,10 @@ class WorkableAdapter(PlatformAdapter):
             textarea = label.locator("textarea")
             combobox = label.locator("[role='combobox']")
 
+            if label.locator(".react-datepicker-wrapper").count() > 0:
+                self._fill_date_picker(label)
+                continue
+
             if text_input.count() > 0:
                 input_el = text_input.first
                 name = input_el.get_attribute("name") or ""
@@ -235,6 +239,31 @@ class WorkableAdapter(PlatformAdapter):
                         profile, job, question, self.config.get("screening_defaults", {})
                     )
                     ta.fill(answer)
+
+    def _fill_date_picker(self, label) -> None:
+        """A react-datepicker field (e.g. "When will you be available to
+        start?") can't be filled with plain text like "Immediately
+        available" -- confirmed live (2026-10-31): typing non-date text
+        into it leaves its calendar popup OPEN (the library tries to
+        interpret the typed text and never resolves to a valid date, so
+        it never auto-closes), and that open popup then visually overlaps
+        and silently breaks filling OTHER fields further down the page
+        (two required textareas came back empty after this, despite
+        .fill() raising no error). Same fix as Ashby's date-picker
+        handling: click the input, then click today's date in the
+        calendar -- the one real, honest date for "available
+        immediately" without guessing a future one."""
+        date_input = label.locator("input[type='text']").first
+        if (date_input.input_value() or "").strip():
+            return
+        date_input.click()
+        self.page.wait_for_timeout(300)
+        today_cell = self.page.locator(".react-datepicker__day--today")
+        if today_cell.count() > 0:
+            today_cell.first.click()
+        else:
+            date_input.press("Escape")
+        self.page.wait_for_timeout(200)
 
     def _fill_combobox(self, combo, question: str, job: JobPosting, profile: Profile) -> None:
         if (combo.input_value() or "").strip():
@@ -342,14 +371,14 @@ class WorkableAdapter(PlatformAdapter):
                     break
 
     def _fill_checkbox_groups(self, job: JobPosting, profile: Profile) -> None:
-        # Checkbox-based questions didn't turn up on any sampled Workable
-        # form (checked several real companies 2026-10-31) -- consent is
-        # typically a privacy-policy link rather than a checkbox, and no
-        # multi-select checkbox question was found either. role='group' is
-        # the standard ARIA pairing for fieldset[role='radiogroup']'s
-        # checkbox equivalent, kept as a best-effort for whichever
-        # company's form does use one, but unverified against a real one.
-        fieldsets = self.page.locator("form fieldset[role='group']")
+        # Confirmed live (2026-10-31): a real multi-select checkbox
+        # question ("Which of the following technologies have you...")
+        # groups its checkboxes under a plain <div role="group">, NOT
+        # <fieldset role="group"> -- fieldset is only used for radiogroup.
+        # The original fieldset-only selector silently never matched this
+        # question at all (not even flagged as missing, since the
+        # required-fields check used the same fieldset-only selector).
+        fieldsets = self.page.locator("form [role='group']")
         for i in range(fieldsets.count()):
             fieldset = fieldsets.nth(i)
             checkboxes = fieldset.locator("input[type='checkbox']")
@@ -426,7 +455,10 @@ class WorkableAdapter(PlatformAdapter):
                 if not (textarea.first.input_value() or "").strip():
                     missing.append(question)
 
-        fieldsets = self.page.locator("form fieldset[role='radiogroup'], form fieldset[role='group']")
+        # Checkbox groups use <div role="group">, radio groups use
+        # <fieldset role="radiogroup"> -- confirmed live, see
+        # _fill_checkbox_groups.
+        fieldsets = self.page.locator("form fieldset[role='radiogroup'], form [role='group']")
         for i in range(fieldsets.count()):
             fieldset = fieldsets.nth(i)
             block = self._fieldset_question_block(fieldset)
