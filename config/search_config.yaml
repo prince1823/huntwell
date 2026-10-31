@@ -49,6 +49,18 @@ apply_delay_seconds:
   min: 30
   max: 90
 
+# Pauses INSIDE a single Ashby/Workable form, independent of the gap
+# between applications above. field_* is the wait before each widget
+# (reading the next question); key_* is per-keystroke typing instead of
+# dumping the whole value with fill(). typing_cap_ms speeds up long
+# answers so a cover-letter box doesn't stall the run. 0/0 = instant fill.
+form_fill_delay_ms:
+  field_min: 2000
+  field_max: 4500
+  key_min: 80
+  key_max: 180
+  typing_cap_ms: 15000
+
 # Per-platform overrides -- higher volume on one platform doesn't have to
 # mean higher volume (and higher ban risk) on another.
 max_applications_per_day:

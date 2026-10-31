@@ -73,7 +73,7 @@ async def start_run(
     RUNS[run_id] = events
 
     thread = threading.Thread(
-        target=_run_and_release, args=(resume_path, 0.60, events, profile), daemon=True
+        target=_run_and_release, args=(resume_path, 0.30, events, profile), daemon=True
     )
     thread.start()
 

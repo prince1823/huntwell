@@ -121,9 +121,11 @@ class WorkableAdapter(PlatformAdapter):
                 job=job, status="needs_review", reason="Submit button disabled -- a required field was likely missed"
             )
 
+        pre_submit_url = self.page.url
+        self._human_field_pause()
         submit_btn.first.click()
         self.page.wait_for_timeout(2500)
-        if self._submission_confirmed(form):
+        if self._submission_confirmed(form, pre_submit_url):
             return ApplicationResult(job=job, status="applied")
         # Same bug class already fixed on LinkedIn/Ashby -- clicking Submit
         # is not proof Workable accepted the application (and this form
@@ -181,6 +183,7 @@ class WorkableAdapter(PlatformAdapter):
         if file_input.count() == 0:
             file_input = self.page.locator("input[type='file']")
         if file_input.count() > 0 and profile.resume_pdf_path:
+            self._human_field_pause()
             file_input.first.set_input_files(profile.resume_pdf_path)
             self.page.wait_for_timeout(1500)
 
@@ -188,7 +191,8 @@ class WorkableAdapter(PlatformAdapter):
         field = self.page.locator(f"input[name='{name}']").first
         if field.count() == 0 or (field.input_value() or "").strip():
             return
-        field.fill(value or "")
+        self._human_field_pause()
+        self._human_type(field, value or "")
 
     def _fill_labeled_fields(self, job: JobPosting, profile: Profile) -> None:
         """Every plain text/email/textarea/combobox field on a Workable form
@@ -209,6 +213,7 @@ class WorkableAdapter(PlatformAdapter):
             combobox = label.locator("[role='combobox']")
 
             if label.locator(".react-datepicker-wrapper").count() > 0:
+                self._human_field_pause()
                 self._fill_date_picker(label)
                 continue
 
@@ -225,20 +230,23 @@ class WorkableAdapter(PlatformAdapter):
                     value = self.tailor.answer_screening_question(
                         profile, job, question, self.config.get("screening_defaults", {})
                     )
-                input_el.fill(value)
+                self._human_field_pause()
+                self._human_type(input_el, value)
             elif combobox.count() > 0:
+                self._human_field_pause()
                 self._fill_combobox(combobox.first, question, job, profile)
             elif textarea.count() > 0:
                 ta = textarea.first
                 if (ta.input_value() or "").strip():
                     continue
+                self._human_field_pause()
                 if "excite" in question.lower() or "why" in question.lower() or "interest" in question.lower():
-                    ta.fill(self.tailor.company_interest_answer(profile, job))
+                    self._human_type(ta, self.tailor.company_interest_answer(profile, job))
                 else:
                     answer = self.tailor.answer_screening_question(
                         profile, job, question, self.config.get("screening_defaults", {})
                     )
-                    ta.fill(answer)
+                    self._human_type(ta, answer)
 
     def _fill_date_picker(self, label) -> None:
         """A react-datepicker field (e.g. "When will you be available to
@@ -306,7 +314,7 @@ class WorkableAdapter(PlatformAdapter):
             value = self.tailor.answer_screening_question(
                 profile, job, question, self.config.get("screening_defaults", {})
             )
-        combo.fill(value)
+        self._human_type(combo, value)
         value_words = [w.lower() for w in re.split(r"[,\s]+", value) if len(w) >= 3]
         options = self.page.locator("[role='option']")
         for _ in range(8):
@@ -354,6 +362,7 @@ class WorkableAdapter(PlatformAdapter):
             if count == 0 or any(radios.nth(j).is_checked() for j in range(count)):
                 continue
 
+            self._human_field_pause()
             question = self._fieldset_question(self._fieldset_question_block(fieldset))
             option_texts = []
             for j in range(count):
@@ -386,6 +395,7 @@ class WorkableAdapter(PlatformAdapter):
             if count == 0:
                 continue
 
+            self._human_field_pause()
             question = self._fieldset_question(self._fieldset_question_block(fieldset))
             if count == 1:
                 cb = checkboxes.first
@@ -480,7 +490,17 @@ class WorkableAdapter(PlatformAdapter):
 
         return missing
 
-    def _submission_confirmed(self, form) -> bool:
+    def _submission_confirmed(self, form, pre_submit_url: str) -> bool:
+        """Three independent signals, any one counts as confirmed: (1) the
+        URL changed to a confirmation route (Workable redirects a
+        successful guest-apply submit off the .../apply/ page, e.g. to
+        .../apply/thank-you or with a confirmation query param), (2) a
+        visible confirmation message, or (3) the form itself is gone."""
+        try:
+            if self.page.url != pre_submit_url:
+                return True
+        except Exception:
+            pass
         try:
             confirmation = self.page.get_by_text(
                 re.compile(r"application (was |has been )?(submitted|received)|thank you for applying", re.I)

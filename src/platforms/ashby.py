@@ -299,6 +299,7 @@ class AshbyAdapter(PlatformAdapter):
             return ApplicationResult(job=job, status="needs_review", reason="No application form found")
 
         self._fill_entries(entries, job, profile)
+        self._human_field_pause()
         self._check_standalone_agreement_boxes()
 
         # The Submit button's disabled state isn't reliably tied to
@@ -320,9 +321,11 @@ class AshbyAdapter(PlatformAdapter):
                 job=job, status="needs_review", reason="Submit button disabled -- a required field was likely missed"
             )
 
+        pre_submit_url = self.page.url
+        self._human_field_pause()
         submit_btn.first.click()
         self.page.wait_for_timeout(2500)
-        if self._submission_confirmed(entries):
+        if self._submission_confirmed(entries, pre_submit_url):
             return ApplicationResult(job=job, status="applied")
         # Clicking Submit is not proof Ashby accepted it -- same bug class
         # already found and fixed on LinkedIn. Ashby's guest-apply forms
@@ -354,14 +357,18 @@ class AshbyAdapter(PlatformAdapter):
             # these stay a direct lookup rather than going through
             # classification.
             if field_path == "_systemfield_name":
+                self._human_field_pause()
                 self._fill_text(entry, profile.full_name)
             elif field_path == "_systemfield_email":
+                self._human_field_pause()
                 self._fill_text(entry, profile.email)
             elif field_path == "_systemfield_resume":
+                self._human_field_pause()
                 self._upload_resume(entry, profile)
             elif entry.locator("input[type='file']").count() > 0:
                 continue  # optional attachment (e.g. cover letter upload) -- leave blank
             elif entry.locator("[class*='-input-yesno']").count() > 0:
+                self._human_field_pause()
                 self._fill_yesno(entry, job, profile, question, defaults)
             elif self._is_structured_group(entry, field_path):
                 # Any repeatable/structured field group -- Education History
@@ -373,12 +380,16 @@ class AshbyAdapter(PlatformAdapter):
                 # top-level field would be.
                 self._fill_structured_group(entry, job, profile, defaults)
             elif entry.locator("[role='combobox']").count() > 0:
+                self._human_field_pause()
                 self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="combobox")
             elif entry.locator("input.ashby-application-form-input-date").count() > 0:
+                self._human_field_pause()
                 self._fill_date_picker(entry)
             elif entry.locator("select").count() > 0:
+                self._human_field_pause()
                 self._fill_select(entry, job, profile, question, defaults)
             elif entry.locator("textarea").count() > 0:
+                self._human_field_pause()
                 self._fill_textarea(entry, job, profile, question, defaults)
             # Checked AFTER text/email/tel/textarea on purpose: a field
             # entry can carry its own primary text input PLUS an unrelated
@@ -391,10 +402,13 @@ class AshbyAdapter(PlatformAdapter):
             # secondary consent radio with no required marking of its own
             # is fine to leave unanswered.
             elif entry.locator("input[type='text'], input[type='email'], input[type='tel']").count() > 0:
+                self._human_field_pause()
                 self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="text")
             elif entry.locator("input[type='checkbox']").count() > 0:
+                self._human_field_pause()
                 self._fill_checkbox(entry, job, profile, question, defaults)
             elif entry.locator("input[type='radio']").count() > 0:
+                self._human_field_pause()
                 self._fill_radio_group(entry, job, profile, question, defaults)
 
     def _fill_known_or_freeform(
@@ -422,17 +436,17 @@ class AshbyAdapter(PlatformAdapter):
         input_el = entry.locator("input[type='text'], input[type='email'], input[type='tel']").first
         if (input_el.input_value() or "").strip():
             return
-        input_el.fill(value or "")
+        self._human_type(input_el, value or "")
 
     def _fill_textarea(self, entry, job: JobPosting, profile: Profile, question: str, defaults: dict) -> None:
         textarea = entry.locator("textarea").first
         if (textarea.input_value() or "").strip():
             return
         if "excite" in question.lower() or "why" in question.lower() or "interest" in question.lower():
-            textarea.fill(self.tailor.company_interest_answer(profile, job))
+            self._human_type(textarea, self.tailor.company_interest_answer(profile, job))
         else:
             answer = self.tailor.answer_screening_question(profile, job, question, defaults)
-            textarea.fill(answer)
+            self._human_type(textarea, answer)
 
     def _fill_yesno(self, entry, job: JobPosting, profile: Profile, question: str, defaults: dict) -> None:
         buttons = entry.locator("[class*='-input-yesno-option']")
@@ -578,20 +592,28 @@ class AshbyAdapter(PlatformAdapter):
                 radios.nth(i).check()
                 return
 
-    def _submission_confirmed(self, entries) -> bool:
+    def _submission_confirmed(self, entries, pre_submit_url: str) -> bool:
         """Checked right after clicking Submit -- clicking the button is not
-        proof Ashby accepted the application. Two independent signals,
-        either counts as confirmed: (1) a visible confirmation message
-        (Ashby's own post-submit text says the application was "submitted"/
-        "received"/a "thank you"), or (2) the application form itself is
-        gone -- a successful submit typically replaces the form with a
-        confirmation screen, while a client-side validation error leaves
-        the form (and its fields) still on the page. NOT verified against a
+        proof Ashby accepted the application. Three independent signals,
+        any one counts as confirmed: (1) the URL changed to a confirmation
+        route (Ashby redirects a successful guest-apply submit to its own
+        post-submit URL, e.g. appending "?submitted" or moving off
+        ".../application"), (2) a visible confirmation message (Ashby's own
+        post-submit text says the application was "submitted"/"received"/a
+        "thank you"), or (3) the application form itself is gone -- a
+        successful submit typically replaces the form with a confirmation
+        screen, while a client-side validation error leaves the form (and
+        its fields) still on the page. NOT verified against a
         guaranteed-successful real submission yet (this project avoids
         deliberately submitting a real test application just to observe
-        the confirmation text) -- if this starts producing false
+        the confirmation text/URL) -- if this starts producing false
         needs_review on postings that actually did go through, the signals
         here need adjusting against a confirmed real one."""
+        try:
+            if self.page.url != pre_submit_url:
+                return True
+        except Exception:
+            pass
         try:
             confirmation = self.page.get_by_text(
                 re.compile(r"application (was |has been )?(submitted|received)|thank you for applying", re.I)
@@ -609,7 +631,7 @@ class AshbyAdapter(PlatformAdapter):
         input_el = entry.locator("input[role='combobox'], input._input_d7ago_28").first
         if input_el.count() == 0 or (input_el.input_value() or "").strip():
             return
-        input_el.fill(value)
+        self._human_type(input_el, value)
 
         # Picking the first suggestion blindly is wrong -- a typeahead can
         # fuzzy-match to an unrelated result (e.g. "Remote" once matched a
@@ -685,6 +707,7 @@ class AshbyAdapter(PlatformAdapter):
             if date_selects.count() >= 2:
                 month, year = _parse_month_year(value)
                 if year:
+                    self._human_field_pause()
                     try:
                         if month:
                             date_selects.nth(0).select_option(value=month)
@@ -696,7 +719,8 @@ class AshbyAdapter(PlatformAdapter):
             text_input = entry.locator(f"input#{for_attr}")
             if text_input.count() > 0:
                 if value and not (text_input.first.input_value() or "").strip():
-                    text_input.first.fill(value)
+                    self._human_field_pause()
+                    self._human_type(text_input.first, value)
                 continue
 
             # No id'd input matched -- an autocomplete/combobox sub-field
@@ -704,6 +728,7 @@ class AshbyAdapter(PlatformAdapter):
             # _fill_autocomplete scoped to the whole group entry finds the
             # one nested combobox, same as it would at the top level.
             if value:
+                self._human_field_pause()
                 self._fill_autocomplete(entry, value)
 
     def _upload_resume(self, entry, profile: Profile) -> None:
