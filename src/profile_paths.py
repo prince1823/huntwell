@@ -37,6 +37,11 @@ def resolve_profile_paths(
     override.
     """
     config_arg = Path(config_arg)
+    # Resolve before comparing -- the CLI's default is the relative string
+    # "config/search_config.yaml" while DEFAULT_CONFIG_PATH is absolute, so
+    # a bare `==` here was always False for ordinary CLI runs, silently
+    # skipping the profile/root override below no matter what it contained.
+    is_default_config = config_arg.resolve() == DEFAULT_CONFIG_PATH.resolve()
 
     if profile_name:
         profile_dir = ROOT / "profiles" / profile_name
@@ -51,7 +56,7 @@ def resolve_profile_paths(
             load_dotenv(profile_env, override=True)
 
         profile_config = profile_dir / "search_config.yaml"
-        config_path = profile_config if (config_arg == DEFAULT_CONFIG_PATH and profile_config.exists()) else config_arg
+        config_path = profile_config if (is_default_config and profile_config.exists()) else config_arg
     else:
         state_dir = ROOT / "auth_state"
         state_dir.mkdir(exist_ok=True)
@@ -63,7 +68,7 @@ def resolve_profile_paths(
         # for the root account -- lets the root account pin its own search
         # locations etc. without editing the shared default config.
         root_config = ROOT / "search_config.yaml"
-        config_path = root_config if (config_arg == DEFAULT_CONFIG_PATH and root_config.exists()) else config_arg
+        config_path = root_config if (is_default_config and root_config.exists()) else config_arg
 
     return ProfilePaths(
         profile_name=profile_name,

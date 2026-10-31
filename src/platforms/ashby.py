@@ -40,6 +40,27 @@ from .base import PlatformAdapter
 JOB_ID_RE = re.compile(r"/([a-f0-9-]{36})$")
 AGGREGATOR_API = "https://jobs.whatrunsindia.com/api/jobs"
 
+# A single checkbox phrased this way ("I agree to...", "I certify that...",
+# "I acknowledge...", "I confirm...") is the application's own consent/
+# accuracy checkbox, not a genuine yes/no question with a real "no" answer
+# -- it must be checked for the form to submit at all, the same way
+# clicking Submit itself is just completing the application the user
+# already asked this tool to submit. A single checkbox that ISN'T phrased
+# this way (e.g. "Are you legally authorized to work...") is a real
+# question and goes through answer_single_choice instead of being blindly
+# checked.
+#
+# Confirmed live (2026-10-31): a standalone "confirm that"-only pattern
+# missed a real required checkbox phrased "I confirm I have read the
+# above." sitting right next to an Arbitration Agreement acknowledgment
+# checkbox on an OpenAI posting -- left unchecked, silently blocking
+# submission. "confirm" alone (not just "confirm that") and "read the
+# above"/"read and understood" catch that phrasing and similar variants.
+AGREEMENT_RE = re.compile(
+    r"agree|consent|certify|acknowledg|true and correct|accurate|confirm|attest|read (the above|and underst)",
+    re.I,
+)
+
 MONTH_NAME_TO_NUM = {
     "january": "1", "february": "2", "march": "3", "april": "4", "may": "5", "june": "6",
     "july": "7", "august": "8", "september": "9", "october": "10", "november": "11", "december": "12",
@@ -278,6 +299,7 @@ class AshbyAdapter(PlatformAdapter):
             return ApplicationResult(job=job, status="needs_review", reason="No application form found")
 
         self._fill_entries(entries, job, profile)
+        self._check_standalone_agreement_boxes()
 
         # The Submit button's disabled state isn't reliably tied to
         # client-side validation on this form (confirmed live: it stayed
@@ -352,10 +374,28 @@ class AshbyAdapter(PlatformAdapter):
                 self._fill_structured_group(entry, job, profile, defaults)
             elif entry.locator("[role='combobox']").count() > 0:
                 self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="combobox")
+            elif entry.locator("input.ashby-application-form-input-date").count() > 0:
+                self._fill_date_picker(entry)
+            elif entry.locator("select").count() > 0:
+                self._fill_select(entry, job, profile, question, defaults)
             elif entry.locator("textarea").count() > 0:
                 self._fill_textarea(entry, job, profile, question, defaults)
+            # Checked AFTER text/email/tel/textarea on purpose: a field
+            # entry can carry its own primary text input PLUS an unrelated
+            # secondary checkbox/radio group nested in the same entry (e.g.
+            # Amplify's "Mobile Number" text field bundles an optional SMS
+            # texting-consent Yes/No radio group right below it) -- checked
+            # first, the checkbox/radio branches below would swallow the
+            # whole entry and the actual required text input would never
+            # get filled at all. The primary widget always wins; a
+            # secondary consent radio with no required marking of its own
+            # is fine to leave unanswered.
             elif entry.locator("input[type='text'], input[type='email'], input[type='tel']").count() > 0:
                 self._fill_known_or_freeform(entry, question, job, profile, defaults, widget="text")
+            elif entry.locator("input[type='checkbox']").count() > 0:
+                self._fill_checkbox(entry, job, profile, question, defaults)
+            elif entry.locator("input[type='radio']").count() > 0:
+                self._fill_radio_group(entry, job, profile, question, defaults)
 
     def _fill_known_or_freeform(
         self, entry, question: str, job: JobPosting, profile: Profile, defaults: dict, widget: str
@@ -411,6 +451,133 @@ class AshbyAdapter(PlatformAdapter):
                 btn.click()
                 return
 
+    def _check_standalone_agreement_boxes(self) -> None:
+        """Some Ashby forms put a plain "I agree to the terms/privacy
+        policy" checkbox directly before the Submit button, OUTSIDE any
+        ashby-application-form-field-entry div -- _fill_entries only looks
+        inside those, so this consent box was never discovered or checked
+        at all, leaving Submit silently unable to go through. Scoped to
+        only checkboxes whose own label text is agreement/consent language,
+        never a real screening-question checkbox that happens to sit
+        outside a field-entry wrapper."""
+        checkboxes = self.page.locator(
+            "input[type='checkbox']:not(div.ashby-application-form-field-entry input[type='checkbox'])"
+        )
+        for i in range(checkboxes.count()):
+            cb = checkboxes.nth(i)
+            try:
+                if cb.is_checked():
+                    continue
+                cb_id = cb.get_attribute("id") or ""
+                label = self.page.locator(f"label[for='{cb_id}']") if cb_id else cb.locator("xpath=..")
+                text = label.first.inner_text().strip() if label.count() > 0 else ""
+                if AGREEMENT_RE.search(text):
+                    cb.check()
+            except Exception:
+                continue
+
+    def _fill_checkbox(self, entry, job: JobPosting, profile: Profile, question: str, defaults: dict) -> None:
+        checkboxes = entry.locator("input[type='checkbox']")
+        count = checkboxes.count()
+        if count == 0:
+            return
+
+        if count == 1:
+            cb = checkboxes.first
+            if cb.is_checked():
+                return
+            if AGREEMENT_RE.search(question):
+                cb.check()
+                return
+            # A real single-checkbox question (not an agreement/consent
+            # checkbox) -- answer honestly instead of blindly checking it.
+            answer = self.tailor.answer_single_choice(profile, job, question, ["Yes", "No"], defaults)
+            if answer.strip().lower() == "yes":
+                cb.check()
+            return
+
+        # More than one checkbox under one question = a multi-select list
+        # (e.g. "Which of these apply to you?") -- each checkbox's own
+        # label is the option, the question above is just the group
+        # heading already captured in `question`.
+        option_texts = []
+        for i in range(count):
+            cb_id = checkboxes.nth(i).get_attribute("id") or ""
+            opt_label = entry.locator(f"label[for='{cb_id}']") if cb_id else None
+            text = opt_label.first.inner_text().strip() if opt_label and opt_label.count() > 0 else ""
+            option_texts.append(text)
+        if not any(option_texts):
+            return
+        chosen = set(self.tailor.answer_multi_select(profile, job, question, [t for t in option_texts if t], defaults))
+        for i, text in enumerate(option_texts):
+            if text and text in chosen and not checkboxes.nth(i).is_checked():
+                checkboxes.nth(i).check()
+
+    def _fill_date_picker(self, entry) -> None:
+        """A react-datepicker text input (e.g. "earliest start date") can't
+        be filled with plain text like answer_screening_question's
+        "Immediately" -- it needs an actual calendar date selected through
+        its own popup, or the value never really commits. Today's date is
+        the one real, honest date that represents "available immediately"
+        without computing or guessing a future date (same policy as the
+        free-text version of this answer)."""
+        date_input = entry.locator("input.ashby-application-form-input-date").first
+        if (date_input.input_value() or "").strip():
+            return
+        date_input.click()
+        self.page.wait_for_timeout(300)
+        today_cell = self.page.locator(".react-datepicker__day--today")
+        if today_cell.count() > 0:
+            today_cell.first.click()
+        else:
+            date_input.press("Escape")
+
+    def _fill_select(self, entry, job: JobPosting, profile: Profile, question: str, defaults: dict) -> None:
+        select_el = entry.locator("select").first
+        if select_el.count() == 0 or (select_el.input_value() or "").strip():
+            return
+        options = select_el.locator("option")
+        choices = []
+        for i in range(options.count()):
+            opt = options.nth(i)
+            text = opt.inner_text().strip()
+            value = opt.get_attribute("value") or ""
+            if text and value:
+                choices.append((text, value))
+        if not choices:
+            return
+        answer = self.tailor.answer_single_choice(profile, job, question, [c[0] for c in choices], defaults)
+        for text, value in choices:
+            if text.strip().lower() == answer.strip().lower():
+                select_el.select_option(value=value)
+                return
+        for text, value in choices:
+            if answer.strip().lower() in text.lower() or text.lower() in answer.strip().lower():
+                select_el.select_option(value=value)
+                return
+
+    def _fill_radio_group(self, entry, job: JobPosting, profile: Profile, question: str, defaults: dict) -> None:
+        """A single-choice question rendered as plain HTML radio inputs
+        rather than Ashby's own yesno widget (which is handled separately).
+        Grouped by their shared `name` attribute, same as native radios."""
+        radios = entry.locator("input[type='radio']")
+        count = radios.count()
+        if count == 0 or any(radios.nth(i).is_checked() for i in range(count)):
+            return
+        option_texts = []
+        for i in range(count):
+            radio_id = radios.nth(i).get_attribute("id") or ""
+            opt_label = entry.locator(f"label[for='{radio_id}']") if radio_id else None
+            text = opt_label.first.inner_text().strip() if opt_label and opt_label.count() > 0 else ""
+            option_texts.append(text)
+        if not any(option_texts):
+            return
+        answer = self.tailor.answer_single_choice(profile, job, question, [t for t in option_texts if t], defaults)
+        for i, text in enumerate(option_texts):
+            if text.strip().lower() == answer.strip().lower():
+                radios.nth(i).check()
+                return
+
     def _submission_confirmed(self, entries) -> bool:
         """Checked right after clicking Submit -- clicking the button is not
         proof Ashby accepted the application. Two independent signals,
@@ -443,19 +610,31 @@ class AshbyAdapter(PlatformAdapter):
         if input_el.count() == 0 or (input_el.input_value() or "").strip():
             return
         input_el.fill(value)
-        self.page.wait_for_timeout(800)
-        options = self.page.locator("[role='option']")
+
         # Picking the first suggestion blindly is wrong -- a typeahead can
         # fuzzy-match to an unrelated result (e.g. "Remote" once matched a
         # town called "Remte, Latvia"). Only select an option that actually
         # shares a meaningful word with what we typed; otherwise leave the
         # field as typed-but-unselected rather than submit a wrong match.
         value_words = [w.lower() for w in re.split(r"[,\s]+", value) if len(w) >= 3]
-        for i in range(options.count()):
-            opt_text = options.nth(i).inner_text().lower()
-            if any(w in opt_text for w in value_words):
-                options.nth(i).click()
-                return
+
+        # Polling instead of one fixed wait -- confirmed live (2026-10-31):
+        # a single 800ms wait sometimes ran before the suggestions API
+        # response landed, found 0 options, and pressed Escape, which
+        # reverts the input to empty rather than just closing the dropdown
+        # -- wiping out a real, correctly-typed value (e.g. "Bengaluru,
+        # Karnataka, India" was a genuine match, just not loaded yet) and
+        # reporting it as a missing required field. Checking repeatedly
+        # over a longer window gives slow suggestion APIs a fair chance
+        # before giving up.
+        options = self.page.locator("[role='option']")
+        for _ in range(8):  # up to ~2.4s total
+            self.page.wait_for_timeout(300)
+            for i in range(options.count()):
+                opt_text = options.nth(i).inner_text().lower()
+                if any(w in opt_text for w in value_words):
+                    options.nth(i).click()
+                    return
         input_el.press("Escape")
 
     def _is_structured_group(self, entry, field_path: str) -> bool:
@@ -566,6 +745,18 @@ class AshbyAdapter(PlatformAdapter):
             elif entry.locator("input[role='combobox']").count() > 0:
                 val = entry.locator("input[role='combobox']").first.input_value()
                 if not (val or "").strip():
+                    missing.append(question)
+            elif entry.locator("select").count() > 0:
+                val = entry.locator("select").first.input_value()
+                if not (val or "").strip():
+                    missing.append(question)
+            elif entry.locator("input[type='checkbox']").count() > 0:
+                boxes = entry.locator("input[type='checkbox']")
+                if not any(boxes.nth(j).is_checked() for j in range(boxes.count())):
+                    missing.append(question)
+            elif entry.locator("input[type='radio']").count() > 0:
+                radios = entry.locator("input[type='radio']")
+                if not any(radios.nth(j).is_checked() for j in range(radios.count())):
                     missing.append(question)
         return missing
 
