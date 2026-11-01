@@ -324,19 +324,26 @@ class AshbyAdapter(PlatformAdapter):
         pre_submit_url = self.page.url
         self._human_field_pause()
         submit_btn.first.click()
-        self.page.wait_for_timeout(2500)
-        if self._submission_confirmed(entries, pre_submit_url):
-            return ApplicationResult(job=job, status="applied")
         # Clicking Submit is not proof Ashby accepted it -- same bug class
-        # already found and fixed on LinkedIn. Ashby's guest-apply forms
-        # have no account to check "did I already apply" against later
-        # (revisiting the URL just shows a blank form regardless), so this
+        # already found and fixed on LinkedIn. Poll long enough to see a
+        # confirmation screen or a CAPTCHA; Ashby's guest-apply forms have
+        # no account to check "did I already apply" against later, so this
         # is the ONLY point where real confirmation can be checked at all.
-        # Fail safe to needs_review instead of guessing.
+        outcome = self._watch_submit_outcome(
+            lambda: self._submission_confirmed(entries, pre_submit_url)
+        )
+        if outcome == "applied":
+            return ApplicationResult(job=job, status="applied")
+        if outcome == "captcha":
+            return ApplicationResult(
+                job=job,
+                status="needs_review",
+                reason="Submit blocked by CAPTCHA -- no success message (application not confirmed)",
+            )
         return ApplicationResult(
             job=job,
             status="needs_review",
-            reason="Clicked Submit but could not confirm Ashby accepted the application",
+            reason="Clicked Submit but no success message appeared (no CAPTCHA detected either)",
         )
 
     def _fill_entries(self, entries, job: JobPosting, profile: Profile) -> None:
@@ -610,7 +617,7 @@ class AshbyAdapter(PlatformAdapter):
         needs_review on postings that actually did go through, the signals
         here need adjusting against a confirmed real one."""
         try:
-            if self.page.url != pre_submit_url:
+            if self.page.url != pre_submit_url and not self._url_looks_like_challenge(self.page.url):
                 return True
         except Exception:
             pass

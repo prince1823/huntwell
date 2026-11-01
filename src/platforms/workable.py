@@ -124,18 +124,25 @@ class WorkableAdapter(PlatformAdapter):
         pre_submit_url = self.page.url
         self._human_field_pause()
         submit_btn.first.click()
-        self.page.wait_for_timeout(2500)
-        if self._submission_confirmed(form, pre_submit_url):
-            return ApplicationResult(job=job, status="applied")
         # Same bug class already fixed on LinkedIn/Ashby -- clicking Submit
-        # is not proof Workable accepted the application (and this form
-        # also has no account to check "did I already apply" against
-        # later). Fail safe to needs_review instead of guessing. NOT yet
-        # verified against a guaranteed-successful real submission.
+        # is not proof Workable accepted it. Poll long enough to see a
+        # confirmation screen or a CAPTCHA; this form also has no account
+        # to check "did I already apply" against later.
+        outcome = self._watch_submit_outcome(
+            lambda: self._submission_confirmed(form, pre_submit_url)
+        )
+        if outcome == "applied":
+            return ApplicationResult(job=job, status="applied")
+        if outcome == "captcha":
+            return ApplicationResult(
+                job=job,
+                status="needs_review",
+                reason="Submit blocked by CAPTCHA -- no success message (application not confirmed)",
+            )
         return ApplicationResult(
             job=job,
             status="needs_review",
-            reason="Clicked Submit but could not confirm Workable accepted the application",
+            reason="Clicked Submit but no success message appeared (no CAPTCHA detected either)",
         )
 
     def _dismiss_cookie_banner(self) -> None:
@@ -497,7 +504,7 @@ class WorkableAdapter(PlatformAdapter):
         .../apply/thank-you or with a confirmation query param), (2) a
         visible confirmation message, or (3) the form itself is gone."""
         try:
-            if self.page.url != pre_submit_url:
+            if self.page.url != pre_submit_url and not self._url_looks_like_challenge(self.page.url):
                 return True
         except Exception:
             pass

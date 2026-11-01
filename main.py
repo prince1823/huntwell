@@ -15,6 +15,7 @@ from src.platforms.ashby import AshbyAdapter
 from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
+from src.platforms.rippling import RipplingAdapter
 from src.platforms.wellfound import WellfoundAdapter
 from src.platforms.workable import WorkableAdapter
 from src.resume_parser import parse_resume
@@ -28,6 +29,7 @@ ADAPTERS = {
     "wellfound": WellfoundAdapter,
     "ashby": AshbyAdapter,
     "workable": WorkableAdapter,
+    "rippling": RipplingAdapter,
 }
 
 

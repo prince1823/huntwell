@@ -1,12 +1,36 @@
 from __future__ import annotations
 
 import random
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from playwright.sync_api import BrowserContext
 
 from ..llm import Tailor
 from ..models import ApplicationResult, JobPosting, Profile
+
+# Widgets/iframes that mean the submit never actually went through.
+_CAPTCHA_SELECTORS = (
+    "iframe[src*='recaptcha']",
+    "iframe[src*='hcaptcha']",
+    "iframe[src*='challenges.cloudflare']",
+    "iframe[src*='turnstile']",
+    "iframe[title*='reCAPTCHA' i]",
+    "iframe[title*='hCaptcha' i]",
+    ".g-recaptcha",
+    ".h-captcha",
+    "div.cf-turnstile",
+    "#cf-challenge-running",
+    "[data-cf-challenge]",
+)
+_CAPTCHA_TEXT = re.compile(
+    r"verify you('re| are) (a )?human|i['’]?m not a robot|complete (the |a )?(captcha|security check)"
+    r"|unusual traffic|security (check|challenge)|please (complete|solve).{0,40}captcha"
+    r"|hcaptcha|recaptcha",
+    re.I,
+)
+_CHALLENGE_URL = re.compile(r"captcha|challenge|cdn-cgi|turnstile|hcaptcha|recaptcha", re.I)
 
 
 class PlatformAdapter(ABC):
@@ -72,6 +96,65 @@ class PlatformAdapter(ABC):
             locator.press_sequentially(value, delay=delay)
         except Exception:
             locator.fill(value)
+
+    def _url_looks_like_challenge(self, url: str) -> bool:
+        return bool(_CHALLENGE_URL.search(url or ""))
+
+    def _captcha_blocking(self) -> bool:
+        """True when a CAPTCHA / bot-check is actually on screen after Submit.
+
+        Presence of a hidden recaptcha badge script is ignored; only a
+        visible widget, challenge iframe, or challenge copy counts. A
+        URL that itself is a challenge page also counts.
+        """
+        try:
+            if self._url_looks_like_challenge(self.page.url):
+                return True
+        except Exception:
+            pass
+        for sel in _CAPTCHA_SELECTORS:
+            try:
+                loc = self.page.locator(sel)
+                if loc.count() > 0 and loc.first.is_visible():
+                    return True
+            except Exception:
+                continue
+        try:
+            text = self.page.get_by_text(_CAPTCHA_TEXT)
+            if text.count() > 0 and text.first.is_visible():
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _watch_submit_outcome(self, is_confirmed: Callable[[], bool]) -> str:
+        """Poll after Submit instead of a single short wait.
+
+        Returns 'applied', 'captcha', or 'unconfirmed'. Captcha is checked
+        first so a challenge-page URL change is not mistaken for success.
+        How long we watch is submit_observe_ms in form_fill_delay_ms
+        (default 45s) -- long enough for a confirmation screen *or* a
+        delayed CAPTCHA to actually appear.
+        """
+        cfg = self._form_delay_cfg()
+        total_ms = int(cfg.get("submit_observe_ms", 45000) or 45000)
+        step_ms = 1500
+        elapsed = 0
+        captcha_seen = False
+        while elapsed < total_ms:
+            self.page.wait_for_timeout(step_ms)
+            elapsed += step_ms
+            if self._captcha_blocking():
+                captcha_seen = True
+                continue
+            try:
+                if is_confirmed():
+                    return "applied"
+            except Exception:
+                continue
+        if captcha_seen or self._captcha_blocking():
+            return "captcha"
+        return "unconfirmed"
 
     @abstractmethod
     def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:

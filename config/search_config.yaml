@@ -46,20 +46,24 @@ max_applications_per_platform_per_day: 10  # default/fallback for any platform n
 # Ashby/Workable's CAPTCHA, which confirmed live correlates with burst
 # volume, not daily totals. 0/0 = no delay.
 apply_delay_seconds:
-  min: 30
-  max: 90
+  min: 60
+  max: 150
 
 # Pauses INSIDE a single Ashby/Workable form, independent of the gap
 # between applications above. field_* is the wait before each widget
 # (reading the next question); key_* is per-keystroke typing instead of
 # dumping the whole value with fill(). typing_cap_ms speeds up long
-# answers so a cover-letter box doesn't stall the run. 0/0 = instant fill.
+# answers so a cover-letter box doesn't stall the run. submit_observe_ms
+# is how long to watch AFTER clicking Submit for a success message or a
+# CAPTCHA (a single 2s wait was too short -- confirmation and challenges
+# both land asynchronously). 0/0 = instant fill.
 form_fill_delay_ms:
-  field_min: 2000
-  field_max: 4500
-  key_min: 80
-  key_max: 180
-  typing_cap_ms: 15000
+  field_min: 8000
+  field_max: 12000
+  key_min: 160
+  key_max: 320
+  typing_cap_ms: 22000
+  submit_observe_ms: 48000
 
 # Per-platform overrides -- higher volume on one platform doesn't have to
 # mean higher volume (and higher ban risk) on another.
@@ -74,6 +78,7 @@ platforms:
   wellfound: true
   ashby: true    # guest apply, no account needed -- see ashby_companies below
   workable: true # guest apply, no account needed -- see workable_companies below
+  rippling: true # guest apply, no account needed -- see rippling_companies below
 
 # Ashby has no cross-company job search -- each company hosts its own
 # careers page at jobs.ashbyhq.com/<slug>. List the company slugs to check
@@ -125,6 +130,22 @@ workable_companies:
   - "keywords-intl1"
   - "arkham-technologies"
   - "masterworksco"
+
+# Rippling, same shape again -- no cross-company search, its own free
+# keyless public JSON API per company (confirmed live 2026-11-01):
+# api.rippling.com/platform/api/ats/v1/board/<slug>/jobs. Find a slug from
+# a company's careers page URL, e.g. ats.rippling.com/carbon-health/jobs ->
+# slug is "carbon-health". Each of these resolved with real, current
+# postings when checked.
+rippling_companies:
+  - "rippling"
+  - "carbon-health"
+  - "vulcanforms"
+  - "princesspolly"
+  - "beehive-industries"
+  - "aalo-atomics"
+  - "contour-education"
+  - "perle"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a

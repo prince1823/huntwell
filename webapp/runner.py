@@ -15,6 +15,7 @@ from src.platforms.ashby import AshbyAdapter
 from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
+from src.platforms.rippling import RipplingAdapter
 from src.platforms.wellfound import WellfoundAdapter
 from src.platforms.workable import WorkableAdapter
 from src.profile_overrides import apply_profile_overrides
@@ -28,6 +29,7 @@ ADAPTERS = {
     "ashby": AshbyAdapter,
     "indeed": IndeedAdapter,
     "workable": WorkableAdapter,
+    "rippling": RipplingAdapter,
 }
 
 
@@ -52,7 +54,7 @@ def _emit(events: queue.Queue, event: dict) -> None:
     elif etype in ("platform_start", "platform_error", "platform_skipped", "platform_done"):
         print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""), flush=True)
 
-RUN_PLATFORMS = ["linkedin", "wellfound", "ashby", "workable"]  # indeed excluded -- see README
+RUN_PLATFORMS = ["linkedin", "wellfound", "ashby", "workable", "rippling"]  # indeed excluded -- see README
 
 
 def _load_config(config_path: Path) -> dict:
