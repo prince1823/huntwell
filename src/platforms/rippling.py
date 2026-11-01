@@ -303,6 +303,21 @@ class RipplingAdapter(PlatformAdapter):
                     continue  # optional self-identification, same policy as diversity fields
                 self._human_field_pause()
                 self._fill_select_combobox(wrapper, widget, question, job, profile, defaults)
+            elif widget.evaluate("el => el.tagName") in ("INPUT", "TEXTAREA"):
+                # A per-company custom screening question rendered as a
+                # plain text/textarea input (e.g. "Legal Name", "Preferred
+                # name", a referral question) -- confirmed live (2026-11-01,
+                # Beehive Industries board) this has NO other branch to
+                # catch it: it isn't one of the fixed testids, isn't a
+                # combobox, and isn't Location, so it silently went unfilled
+                # and blocked a real submission. data-testid for these
+                # starts with "customQuestions." (unlike the fixed semantic
+                # fields' plain names), but matching by exclusion here is
+                # simpler than enumerating that prefix.
+                if not question:
+                    continue
+                self._human_field_pause()
+                self._fill_known_or_freeform(widget, question, job, profile, defaults)
 
         self._fill_radio_groups(job, profile, defaults)
 

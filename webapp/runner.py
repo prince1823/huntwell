@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import threading
@@ -31,6 +32,28 @@ ADAPTERS = {
     "workable": WorkableAdapter,
     "rippling": RipplingAdapter,
 }
+
+# Each platform runs in its own thread, and every one of them starts its own
+# Playwright driver + browser subprocess. Confirmed live (2026-11-01): firing
+# all of those subprocess spawns at once under uvicorn's uvloop event loop
+# crashed with "RuntimeError: Racing with another loop to spawn a process"
+# -- uvloop's own subprocess-exec path isn't safe to call concurrently from
+# several threads at once, each running sync_playwright()'s own event loop.
+# This only serializes the two moments that actually spawn a subprocess
+# (starting the driver, launching the browser); every platform still
+# searches/applies fully in parallel once its own browser is up.
+_PLAYWRIGHT_LAUNCH_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _serialized_playwright():
+    with _PLAYWRIGHT_LAUNCH_LOCK:
+        pw_cm = sync_playwright()
+        pw = pw_cm.__enter__()
+    try:
+        yield pw
+    finally:
+        pw_cm.__exit__(None, None, None)
 
 
 def _emit(events: queue.Queue, event: dict) -> None:
@@ -182,8 +205,9 @@ def _run_one_platform(
         return
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+        with _serialized_playwright() as pw:
+            with _PLAYWRIGHT_LAUNCH_LOCK:
+                browser = pw.chromium.launch(headless=True)
             context = browser.new_context(storage_state=str(state_file) if state_file.exists() else None)
             adapter: PlatformAdapter = adapter_cls(context, tailor, config)
 
