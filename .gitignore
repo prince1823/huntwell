@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.claude/
+!.claude/launch.json
+.env
+auth_state/
+applications.db
+.cache/
+profiles/
+profile_overrides.yaml
+/search_config.yaml
+*.pdf
+*.docx
+webapp/uploads/
+.DS_Store

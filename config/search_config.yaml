@@ -1,0 +1,159 @@
+# Job search criteria used by every platform adapter.
+
+# By default, search titles are generated per-run from each uploaded resume
+# (see Tailor.suggest_search_titles), so different people's resumes search
+# for roles relevant to them instead of all sharing this list. The list
+# below is only used as a fallback if that AI call fails, or if you set
+# `titles_from_resume: false` below to pin a fixed list for this account.
+titles_from_resume: true
+titles:
+  - "Software Engineer"
+  - "AI Engineer"
+  - "Backend Engineer"
+  - "Full Stack Engineer"
+
+# By default, LinkedIn searches the location stated on each resume (see
+# locations_from_resume below) instead of being locked to "Remote" --
+# that used to be hardcoded here and silently excluded every onsite
+# posting. The list below is only used when a resume has no location, or
+# when locations_from_resume is set to false for this account.
+locations_from_resume: true
+locations:
+  - "Remote"
+
+keywords_include: []     # postings must contain at least one (empty = no filter)
+keywords_exclude:        # postings whose TITLE contains any of these are skipped before scoring
+  - "Clearance Required"
+  # Seniority terms (Senior/Staff/Principal/Lead/Director/Head of/VP/Manager)
+  # used to live here as a global title-substring backstop, but were removed
+  # 2026-10-30: Ashby now has its own server-side exp filter, LinkedIn
+  # already has its own f_E param, and the substring match itself had a real
+  # false-positive problem -- confirmed live it wrongly excluded genuinely
+  # entry-level postings like "Member of Technical Staff, AI Products
+  # (Early Career)" and "...New Grad (BS/MS)" just because "Staff" matched
+  # as a substring. Wellfound has no server-side experience filter, so it
+  # now relies on fit-scoring alone for seniority -- a known tradeoff if
+  # noise reappears there specifically.
+
+min_salary: 0             # 0 = no filter; only enforced when the platform exposes salary data
+
+remote_only: false
+
+max_applications_per_platform_per_day: 10  # default/fallback for any platform not listed below
+
+# A real (random) gap between separate applications -- see main.py's
+# comment at the delay call site for why this helps specifically with
+# Ashby/Workable's CAPTCHA, which confirmed live correlates with burst
+# volume, not daily totals. 0/0 = no delay.
+apply_delay_seconds:
+  min: 60
+  max: 150
+
+# Pauses INSIDE a single Ashby/Workable form, independent of the gap
+# between applications above. field_* is the wait before each widget
+# (reading the next question); key_* is per-keystroke typing instead of
+# dumping the whole value with fill(). typing_cap_ms speeds up long
+# answers so a cover-letter box doesn't stall the run. submit_observe_ms
+# is how long to watch AFTER clicking Submit for a success message or a
+# CAPTCHA (a single 2s wait was too short -- confirmation and challenges
+# both land asynchronously). 0/0 = instant fill.
+form_fill_delay_ms:
+  field_min: 8000
+  field_max: 12000
+  key_min: 160
+  key_max: 320
+  typing_cap_ms: 22000
+  submit_observe_ms: 48000
+
+# Per-platform overrides -- higher volume on one platform doesn't have to
+# mean higher volume (and higher ban risk) on another.
+max_applications_per_day:
+  linkedin: 3000
+  wellfound: 3000
+  ashby: 3000
+
+platforms:
+  linkedin: true
+  indeed: false  # Cloudflare blocks even authenticated sessions, see README
+  wellfound: true
+  ashby: true    # guest apply, no account needed -- see ashby_companies below
+  workable: true # guest apply, no account needed -- see workable_companies below
+  rippling: true # guest apply, no account needed -- see rippling_companies below
+
+# Ashby has no cross-company job search -- each company hosts its own
+# careers page at jobs.ashbyhq.com/<slug>. List the company slugs to check
+# (find a slug by visiting a company's Ashby careers page and reading the
+# URL, e.g. jobs.ashbyhq.com/ashby -> slug is "ashby").
+ashby_companies:
+  - "ashby"
+
+# How many pages of 100 results to pull per search title from the job
+# aggregator (jobs.whatrunsindia.com) -- 100 is the API's own hard max per
+# request, so this is how to pull more than that. 2 = up to 200 candidates
+# per title before fit-scoring/exclude-keywords/caps narrow it down.
+ashby_aggregator_max_pages: 10  # pull the full relevant pool now that exp/minScore/department filter server-side first
+
+# Free, server-side relevance filters on the aggregator -- narrow the pool
+# BEFORE downloading or fit-scoring anything, instead of spending LLM calls
+# on postings that are senior-level or low-relevance by the aggregator's
+# own keyword scoring. Verified live: exp alone cut a 3,975-match search to
+# 811; adding minScore+department brought it to 574, with the right
+# entry-level postings surfacing at the top.
+ashby_exp_filter: true          # map resume years_of_experience to the API's own experience bucket
+ashby_min_score: 20             # 0-1000ish, the aggregator's own composite relevance score; omit/0 = no filter
+ashby_department: "Engineering" # omit/"" = no department filter
+ashby_location: "India"         # omit/"" = no location filter
+ashby_tags_filter: false      # off by default -- too restrictive stacked with location+exp+minScore
+
+# Workable also has no cross-company job search, and (unlike Ashby) no
+# known third-party aggregator either -- but it has its own free, keyless
+# public JSON API per company (confirmed live 2026-10-31):
+# apply.workable.com/api/v1/widget/accounts/<slug>?details=true -- the
+# same one that backs Workable's own "jobs widget" embed. List the company
+# slugs to check (find a slug from a company's careers page URL, e.g.
+# apply.workable.com/callsign -> slug is "callsign").
+workable_companies:
+  - "callsign"
+  - "ottimate"
+  - "destinusgroup"
+  - "irth-solutions"
+  - "fuseenergy"
+  - "devoted-studios-1"
+  - "portless"
+  - "volga-partners"
+  - "workana-premium"
+  - "modash"
+  - "lamdax"
+  - "digitals"
+  - "neurohire-dot-a-i"
+  - "enjins"
+  - "keywords-intl1"
+  - "arkham-technologies"
+  - "masterworksco"
+
+# Rippling, same shape again -- no cross-company search, its own free
+# keyless public JSON API per company (confirmed live 2026-11-01):
+# api.rippling.com/platform/api/ats/v1/board/<slug>/jobs. Find a slug from
+# a company's careers page URL, e.g. ats.rippling.com/carbon-health/jobs ->
+# slug is "carbon-health". Each of these resolved with real, current
+# postings when checked.
+rippling_companies:
+  - "rippling"
+  - "carbon-health"
+  - "vulcanforms"
+  - "princesspolly"
+  - "beehive-industries"
+  - "aalo-atomics"
+  - "contour-education"
+  - "perle"
+
+# Answers used for common screening questions when the LLM can't infer them from your resume.
+# Edit these to your actual numbers -- without them, the agent has to guess a
+# "reasonable" figure for salary/notice-period questions, which you may not want.
+screening_defaults:
+  work_authorization: "Yes, I am authorized to work in this country without sponsorship."
+  willing_to_relocate: "Yes"
+  require_visa_sponsorship: "No"
+  current_ctc_inr: ""           # e.g. "600000" -- leave blank to let the agent estimate
+  expected_ctc_inr: ""          # e.g. "900000"
+  notice_period_days: "0"
