@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 
 from src.llm import Tailor
 from src.models import Profile
+from src.platforms.ashby import AshbyAdapter
 from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
@@ -24,6 +25,7 @@ ADAPTERS = {
     "linkedin": LinkedInAdapter,
     "indeed": IndeedAdapter,
     "wellfound": WellfoundAdapter,
+    "ashby": AshbyAdapter,
 }
 
 
