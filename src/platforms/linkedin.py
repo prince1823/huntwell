@@ -137,7 +137,7 @@ class LinkedInAdapter(PlatformAdapter):
             # conclude "no results" from. Retry the navigation once before
             # giving up on this location.
             found_results = False
-            for attempt in range(2):
+            for _ in range(2):
                 self.page.goto(url, wait_until="domcontentloaded")
                 try:
                     self.page.wait_for_selector("button[aria-label^='Dismiss ']", timeout=15000)
@@ -287,6 +287,16 @@ class LinkedInAdapter(PlatformAdapter):
         except Exception:
             pass
 
+        # The f_E search filter and fit-scoring (which has no JD text to
+        # work with until this exact point -- search_jobs never populates
+        # job.description) can both miss a posting whose title carries no
+        # seniority keyword and whose own self-reported LinkedIn seniority
+        # tag doesn't match its actual stated requirement. Catch it here,
+        # before spending an actual application on it.
+        mismatch = self._jd_experience_mismatch(job.description, profile.years_of_experience)
+        if mismatch:
+            return ApplicationResult(job=job, status="skipped", reason=mismatch)
+
         easy_apply_btn = self.page.get_by_role("button", name=re.compile("Easy Apply", re.I))
         if easy_apply_btn.count() == 0:
             return ApplicationResult(job=job, status="skipped", reason="No Easy Apply button found")
@@ -421,6 +431,17 @@ class LinkedInAdapter(PlatformAdapter):
             answer = self.tailor.answer_screening_question(profile, job, prompt_question, defaults)
             if max_length:
                 answer = answer[:max_length]
+            if (input_el.get_attribute("type") or "") == "number":
+                # A native number input silently discards a non-numeric
+                # .fill() value (the browser's own input validation, not an
+                # error Playwright surfaces) -- confirmed live (2026-11-03)
+                # this left a "years of experience" field empty even though
+                # the prompt explicitly asks for a bare number, the model
+                # can still occasionally answer in a form like "1+" or
+                # "less than 1" for an edge case. Extract the leading
+                # number as a safety net rather than trust free text here.
+                digits = re.search(r"\d+", answer)
+                answer = digits.group(0) if digits else "0"
             input_el.fill(answer)
 
         self._fill_radio_groups(dialog, job, profile, defaults)
@@ -485,10 +506,23 @@ class LinkedInAdapter(PlatformAdapter):
             idx = self._closest_match_index(answer, option_texts)
             target = group.nth(idx if idx is not None else 0)
             target_id = target.get_attribute("id")
-            if target_id:
-                dialog.locator(f"label[for='{target_id}']").click()
-            else:
-                target.check(force=True)
+            label = dialog.locator(f"label[for='{target_id}']") if target_id else None
+
+            # Confirmed live (2026-11-03): a single click/check here can
+            # silently not register -- this is exactly the gap
+            # _unanswered_required_fields used to miss (no radio-group
+            # check at all), which let "Form did not advance after
+            # filling" happen with no visible cause. Retry a few times and
+            # verify, same pattern already proven necessary for Workable's
+            # equally React-controlled radio/checkbox inputs.
+            for _ in range(3):
+                if label is not None and label.count() > 0:
+                    label.first.click()
+                else:
+                    target.check(force=True)
+                self.page.wait_for_timeout(300)
+                if target.is_checked():
+                    break
 
     @staticmethod
     def _question_text(dialog, element) -> str:
@@ -561,7 +595,19 @@ class LinkedInAdapter(PlatformAdapter):
     @staticmethod
     def _unanswered_required_fields(dialog) -> list[str]:
         """Required fields that are still empty after a fill pass -- surfaced
-        as needs_review instead of letting the Next click silently fail."""
+        as needs_review instead of letting the Next click silently fail.
+
+        Confirmed live (2026-11-03): this used to check only text/number
+        inputs and <select> dropdowns -- a radio group, checkbox or
+        textarea that _fill_visible_fields tried to fill but whose click/
+        check silently didn't register (e.g. a label click that missed, or
+        force-checking a radio without firing LinkedIn's own React
+        onChange) came back from this check as "nothing missing" while
+        LinkedIn's own validation still silently blocked Next -- exactly
+        the "Form did not advance after filling" symptom this is the other
+        half of. Every widget type _fill_visible_fields touches now has a
+        matching verification here.
+        """
         missing = []
         for input_el in dialog.locator(
             "input[type='text'][required], input[type='number'][required]"
@@ -571,4 +617,29 @@ class LinkedInAdapter(PlatformAdapter):
         for select_el in dialog.locator("select[required]").all():
             if not (select_el.input_value() or "").strip():
                 missing.append(select_el.get_attribute("aria-label") or "unlabeled dropdown")
+
+        seen_names: set[str] = set()
+        radios = dialog.locator("input[type='radio']")
+        for i in range(radios.count()):
+            radio = radios.nth(i)
+            name = radio.get_attribute("name") or ""
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            group = dialog.locator(f"input[type='radio'][name='{name}']")
+            if not any(group.nth(j).is_checked() for j in range(group.count())):
+                missing.append((group.first.get_attribute("aria-label") or "unlabeled radio group").strip())
+
+        for checkbox in dialog.locator(
+            "input[type='checkbox'][required], input[type='checkbox'][aria-required='true']"
+        ).all():
+            if not checkbox.is_checked():
+                missing.append(checkbox.get_attribute("aria-label") or "unlabeled checkbox")
+
+        for textarea in dialog.locator(
+            "textarea[required], textarea[aria-required='true']"
+        ).all():
+            if not (textarea.input_value() or "").strip():
+                missing.append(textarea.get_attribute("aria-label") or "unlabeled text box")
+
         return missing
