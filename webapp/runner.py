@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import queue
 import threading
 import traceback
@@ -9,7 +8,9 @@ from pathlib import Path
 import yaml
 from playwright.sync_api import sync_playwright
 
+from src.app_settings import max_applications_override, platform_overrides, resolve_api_key, resolve_model
 from src.llm import Tailor
+from src.memory import add_fact, as_prompt_block, load_facts
 from src.models import ApplicationResult, Profile
 from src.platforms.ashby import AshbyAdapter
 from src.platforms.indeed import IndeedAdapter
@@ -80,7 +81,11 @@ def _load_config(config_path: Path) -> dict:
 
 
 def run_pipeline(
-    resume_path: Path, min_fit_score: float, events: queue.Queue, profile_name: str | None = None
+    resume_path: Path,
+    min_fit_score: float,
+    events: queue.Queue,
+    profile_name: str | None = None,
+    stop_event: threading.Event | None = None,
 ) -> None:
     """Runs the full pipeline for the UI: parse resume, then search+apply on
     all RUN_PLATFORMS in parallel threads, pushing progress events into the
@@ -98,16 +103,19 @@ def run_pipeline(
     try:
         paths = resolve_profile_paths(profile_name)
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        # A key saved via the Settings tab (BYOK) always wins over .env --
+        # see src/app_settings.py.
+        api_key = resolve_api_key()
         if not api_key:
-            _emit(events, {"type": "error", "message": "ANTHROPIC_API_KEY not set in .env"})
+            _emit(events, {"type": "error", "message": "No API key set -- add one in Settings, or set ANTHROPIC_API_KEY in .env"})
             _emit(events, {"type": "done"})
             return
+        model = resolve_model()
 
         _emit(events, {"type": "step", "step": 1, "label": "Extracting information from resume"})
-        profile = parse_resume(str(resume_path), api_key, cache_dir=paths.cache_dir)
+        profile = parse_resume(str(resume_path), api_key, cache_dir=paths.cache_dir, model=model)
         profile = apply_profile_overrides(profile_name, profile)
-        _emit(events, 
+        _emit(events,
             {
                 "type": "profile",
                 "name": profile.full_name,
@@ -117,9 +125,48 @@ def run_pipeline(
             }
         )
 
+        # First-ever run for this account: seed the Profile tab's memory
+        # agent from the resume itself, so the flowgraph shows real
+        # (resume-derived, not invented) context right away instead of
+        # starting empty. Only when memory is still empty -- never
+        # overwrites facts the candidate has since added or edited there.
+        if not load_facts(profile_name):
+            if profile.headline:
+                add_fact(profile_name, profile.headline, profile.headline[:28])
+            if profile.years_of_experience:
+                add_fact(
+                    profile_name,
+                    f"{profile.years_of_experience} years of professional experience",
+                    f"{profile.years_of_experience}+ yrs experience",
+                )
+            for skill in profile.skills[:5]:
+                add_fact(profile_name, f"Skilled in {skill}", skill)
+
+        if stop_event and stop_event.is_set():
+            _emit(events, {"type": "stopped"})
+            return
+
         _emit(events, {"type": "step", "step": 2, "label": "Scoring postings and tailoring answers with AI"})
-        tailor = Tailor(api_key, cache_dir=paths.cache_dir)
+        # Facts the candidate typed into the Profile tab's memory agent --
+        # see src/memory.py -- woven into every scoring/tailoring prompt
+        # Tailor builds, so a stated preference ("FinTech only", a target
+        # comp number, "won't relocate") actually shapes fit scores and
+        # generated answers, not just the Profile tab's own display.
+        memory_text = as_prompt_block(load_facts(profile_name))
+        tailor = Tailor(api_key, cache_dir=paths.cache_dir, memory_text=memory_text, model=model)
         cfg = _load_config(paths.config_path)
+
+        # Settings-tab overrides (src/app_settings.py) layer on top of
+        # search_config.yaml rather than rewriting it -- so the Platforms
+        # tab works without ever touching (and stripping the comments
+        # from) the YAML file, and a Settings tab nobody has opened yet
+        # changes nothing about existing behavior.
+        settings_platforms = platform_overrides()
+        if settings_platforms:
+            cfg["platforms"] = {**cfg.get("platforms", {}), **settings_platforms}
+        settings_max_cap = max_applications_override()
+        if settings_max_cap:
+            cfg["max_applications_per_platform_per_day"] = settings_max_cap
 
         # Search titles come from THIS resume by default, not one static list
         # shared by every account -- so two different people's resumes
@@ -132,9 +179,15 @@ def run_pipeline(
                 cfg["titles"] = suggested_titles
                 _emit(events, {"type": "search_titles", "titles": suggested_titles})
 
+        if stop_event and stop_event.is_set():
+            _emit(events, {"type": "stopped"})
+            return
+
         _emit(events, {"type": "step", "step": 3, "label": "Applying on LinkedIn, Wellfound & Ashby"})
         threads = []
         for platform in RUN_PLATFORMS:
+            if stop_event and stop_event.is_set():
+                break
             if not cfg.get("platforms", {}).get(platform, False):
                 _emit(events, {"type": "platform_skipped", "platform": platform, "message": "disabled in config"})
                 continue
@@ -144,7 +197,7 @@ def run_pipeline(
             # silently killed every platform thread the first time this ran.
             t = threading.Thread(
                 target=_run_one_platform,
-                args=(platform, cfg, profile, tailor, min_fit_score, events, paths.state_dir, paths.db_path, resume_path, profile_name),
+                args=(platform, cfg, profile, tailor, min_fit_score, events, paths.state_dir, paths.db_path, resume_path, profile_name, stop_event),
                 daemon=True,
             )
             t.start()
@@ -152,6 +205,9 @@ def run_pipeline(
 
         for t in threads:
             t.join()
+
+        if stop_event and stop_event.is_set():
+            _emit(events, {"type": "stopped"})
     except Exception as e:  # noqa: BLE001 -- surface any crash to the UI instead of hanging it
         print("[run_pipeline] CRASHED:")
         traceback.print_exc()
@@ -171,7 +227,11 @@ def _run_one_platform(
     db_path: Path,
     resume_path: Path,
     profile_name: str | None,
+    stop_event: threading.Event | None = None,
 ) -> None:
+    if stop_event and stop_event.is_set():
+        return
+
     adapter_cls = ADAPTERS[platform]
     state_file = state_dir / f"{platform}.json"
     daily_cap = config.get("max_applications_per_day", {}).get(
@@ -242,6 +302,8 @@ def _run_one_platform(
         for job in postings:
             if applied_count >= daily_cap:
                 break
+            if stop_event and stop_event.is_set():
+                break
             if tracker.already_handled(job):
                 # Same visibility problem as the keyword-exclude case:
                 # re-running the same search finds mostly postings
@@ -282,7 +344,7 @@ def _run_one_platform(
                         "url": job.url,
                         "status": "skipped",
                         "fit": None,
-                        "jd": (job.description or "")[:400],
+                        "jd": job.description or "",
                         "reason": f"title matched excluded keyword '{excluded_kw}'",
                     }
                 )
@@ -299,7 +361,7 @@ def _run_one_platform(
                         "url": job.url,
                         "status": "skipped",
                         "fit": fit,
-                        "jd": (job.description or "")[:400],
+                        "jd": job.description or "",
                         "reason": "below fit threshold",
                     }
                 )
@@ -323,7 +385,7 @@ def _run_one_platform(
                     "url": job.url,
                     "status": result.status,
                     "fit": fit,
-                    "jd": (job.description or "")[:400],
+                    "jd": job.description or "",
                     "reason": result.reason,
                 }
             )

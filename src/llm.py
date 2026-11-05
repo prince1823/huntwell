@@ -46,12 +46,35 @@ class Tailor:
     cache_dir separates one account/profile's cached answers from
     another's when running multiple accounts (see main.py --profile)."""
 
-    def __init__(self, api_key: str, cache_dir: Path | str = DEFAULT_CACHE_DIR):
+    def __init__(
+        self,
+        api_key: str,
+        cache_dir: Path | str = DEFAULT_CACHE_DIR,
+        memory_text: str = "",
+        model: str = MODEL,
+    ):
         self.client = get_client(api_key)
         self.cache = JSONCache("llm_answers", base_dir=cache_dir)
+        # Free-text facts/preferences the candidate typed into the Profile
+        # tab's memory agent (see src/memory.py) -- woven into every prompt
+        # below that already describes the candidate, so scoring and
+        # tailored answers actually account for things a resume alone
+        # can't say ("prefers remote", "FinTech only", target comp, etc.).
+        self.memory_text = memory_text.strip()
+        # BYOK model choice from the Settings tab (src/app_settings.py);
+        # defaults to the module-level MODEL constant when unset.
+        self.model = model
+
+    def _memory_block(self, label: str = "CANDIDATE PREFERENCES / NOTES (from the candidate directly -- weigh these heavily)") -> str:
+        if not self.memory_text:
+            return ""
+        return f"\n{label}:\n{self.memory_text}\n"
 
     def _profile_fingerprint(self, profile: Profile) -> str:
-        return JSONCache.make_key(profile.model_dump_json())
+        # model is part of the fingerprint too, so switching models in
+        # Settings doesn't silently keep serving cached answers from a
+        # different model.
+        return JSONCache.make_key(profile.model_dump_json(), self.memory_text, self.model)
 
     def cover_letter(self, profile: Profile, job: JobPosting) -> str:
         key = JSONCache.make_key(
@@ -80,14 +103,14 @@ CANDIDATE EXPERIENCE:
 
 CANDIDATE EDUCATION:
 {self._format_education(profile)}
-
+{self._memory_block()}
 JOB TITLE: {job.title}
 COMPANY: {job.company}
 JOB DESCRIPTION:
 {job.description[:3000]}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=500, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=500, messages=[{"role": "user", "content": prompt}]
         )
         answer = resp.choices[0].message.content.strip()
         self.cache.set(key, answer)
@@ -125,14 +148,14 @@ CANDIDATE EXPERIENCE:
 {self._format_experience(profile)}
 CANDIDATE EDUCATION:
 {self._format_education(profile)}
-
+{self._memory_block()}
 JOB TITLE: {job.title}
 COMPANY: {job.company}
 JOB/COMPANY INFO:
 {job.description[:4000]}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=250, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=250, messages=[{"role": "user", "content": prompt}]
         )
         answer = resp.choices[0].message.content.strip()
         self.cache.set(key, answer)
@@ -173,7 +196,7 @@ CANDIDATE EXPERIENCE:
 {self._format_experience(profile)}
 CANDIDATE EDUCATION:
 {self._format_education(profile)}
-
+{self._memory_block()}
 DEFAULTS (use if the resume is silent but a default covers this): {json.dumps(defaults, indent=2)}
 
 JOB: {job.title} at {job.company}
@@ -183,7 +206,7 @@ OPTIONS:
 {chr(10).join(options)}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=50, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=50, messages=[{"role": "user", "content": prompt}]
         )
         text = resp.choices[0].message.content.strip()
         answer = next((opt for opt in options if opt.strip().lower() == text.strip().lower()), None)
@@ -229,7 +252,7 @@ CANDIDATE EXPERIENCE:
 {self._format_experience(profile)}
 CANDIDATE EDUCATION:
 {self._format_education(profile)}
-
+{self._memory_block()}
 DEFAULTS (use if the resume is silent but a default covers this): {json.dumps(defaults, indent=2)}
 
 JOB: {job.title} at {job.company}
@@ -239,7 +262,7 @@ OPTIONS:
 {chr(10).join(options)}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=200, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
         )
         text = resp.choices[0].message.content.strip()
         if text.upper() == "NONE":
@@ -316,7 +339,7 @@ broken, not honest.
 
 CANDIDATE PROFILE (JSON):
 {profile.model_dump_json(indent=2)}
-
+{self._memory_block()}
 DEFAULT ANSWERS (use if resume has no info):
 {json.dumps(defaults, indent=2)}
 
@@ -325,7 +348,7 @@ JOB: {job.title} at {job.company}
 QUESTION: {question}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=150, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=150, messages=[{"role": "user", "content": prompt}]
         )
         answer = resp.choices[0].message.content.strip()
         self.cache.set(key, answer)
@@ -380,13 +403,13 @@ because nothing contradicts it.
 CANDIDATE HEADLINE: {profile.headline}
 CANDIDATE SKILLS: {", ".join(profile.skills)}
 CANDIDATE YEARS OF EXPERIENCE: {profile.years_of_experience}
-
+{self._memory_block("CANDIDATE PREFERENCES / NOTES (from the candidate directly -- factor these into fit too, e.g. a stated industry/role preference)")}
 JOB TITLE: {job.title}
 JOB DESCRIPTION:
 {job.description[:2000]}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=10, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=10, messages=[{"role": "user", "content": prompt}]
         )
         try:
             score = float(resp.choices[0].message.content.strip())
@@ -426,7 +449,7 @@ unambiguously and specifically asking for that exact fact.
 QUESTION: {question}
 """
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=20, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=20, messages=[{"role": "user", "content": prompt}]
         )
         answer = resp.choices[0].message.content.strip().lower().strip('."')
         result = answer if answer in PROFILE_SLOTS else "freeform"
@@ -455,9 +478,9 @@ CANDIDATE SUMMARY: {profile.summary}
 CANDIDATE SKILLS: {", ".join(profile.skills)}
 CANDIDATE YEARS OF EXPERIENCE: {profile.years_of_experience}
 MOST RECENT ROLE: {profile.experience[0].title if profile.experience else "N/A"}
-"""
+{self._memory_block()}"""
         resp = self.client.chat.completions.create(
-            model=MODEL, max_tokens=150, messages=[{"role": "user", "content": prompt}]
+            model=self.model, max_tokens=150, messages=[{"role": "user", "content": prompt}]
         )
         text = resp.choices[0].message.content.strip()
         if text.startswith("```"):

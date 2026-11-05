@@ -62,11 +62,11 @@ export default function AppliedTab({ profile }) {
   }, [profile, status, q]);
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-28 pt-6">
+    <div className="mx-auto max-w-md px-4 pb-10 pt-6 sm:max-w-2xl sm:px-6 lg:max-w-none lg:px-10 xl:px-16">
       <h1 className="mb-4 text-lg font-bold text-ink">Applied</h1>
 
       {stats && (
-        <div className="mb-4 grid grid-cols-2 gap-2.5">
+        <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           <StatTile icon={SendHorizonal} label="Submitted" value={stats.submitted} />
           <StatTile icon={CheckCircle2} label="Successful" value={stats.successful} />
           <StatTile icon={UserCheck} label="Needs you" value={stats.needs_you} />
@@ -106,7 +106,7 @@ export default function AppliedTab({ profile }) {
         </div>
       )}
 
-      <div className="flex flex-col gap-2.5">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {apps.map((a) => (
           <div key={`${a.platform}-${a.job_id}`} className="rounded-2xl border border-line bg-white p-3.5">
             <div className="flex items-start justify-between gap-2">

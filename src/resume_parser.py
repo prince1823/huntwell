@@ -84,7 +84,7 @@ RESUME TEXT:
 
 
 def parse_resume(
-    resume_path: str, api_key: str, force_refresh: bool = False, cache_dir=DEFAULT_CACHE_DIR
+    resume_path: str, api_key: str, force_refresh: bool = False, cache_dir=DEFAULT_CACHE_DIR, model: str | None = None
 ) -> Profile:
     """Parse a resume file (.pdf/.docx/.txt) into a structured Profile.
 
@@ -109,7 +109,7 @@ def parse_resume(
 
     client = get_client(api_key)
     response = client.chat.completions.create(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=2000,
         messages=[
             {

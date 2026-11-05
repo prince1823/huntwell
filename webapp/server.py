@@ -8,12 +8,18 @@ import threading
 import uuid
 from pathlib import Path
 
+import yaml
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from src import app_settings
+from src import memory as memory_store
+from src.profile_overrides import apply_profile_overrides
 from src.profile_paths import resolve_profile_paths
+from src.resume_parser import parse_resume
 from webapp import hitl_queue
 from webapp.runner import run_pipeline
 
@@ -37,6 +43,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
 RUNS: dict[str, queue.Queue] = {}
+STOP_EVENTS: dict[str, threading.Event] = {}
 
 # Starting a new run never used to check whether a previous one for the
 # SAME account was still going -- each click just spawned an independent
@@ -49,13 +56,32 @@ RUNS: dict[str, queue.Queue] = {}
 ACTIVE_PROFILES: set[str | None] = set()
 ACTIVE_PROFILES_LOCK = threading.Lock()
 
+# Lets a 409 "already in progress" response hand the client the OTHER run's
+# id, so the UI can offer to cancel that stuck/forgotten run on the spot
+# instead of leaving the account locked with no way to free it short of
+# restarting the server (what used to happen whenever the browser lost
+# track of a run_id -- a page reload, or any gap before the tab-persistence
+# fix -- since ACTIVE_PROFILES only ever cleared via that one run's own
+# finally block, never via anything reachable from a fresh page load).
+ACTIVE_RUNS: dict[str | None, str] = {}
 
-def _run_and_release(resume_path: Path, min_fit_score: float, events: queue.Queue, profile_name: str | None) -> None:
+
+def _run_and_release(
+    resume_path: Path,
+    min_fit_score: float,
+    events: queue.Queue,
+    profile_name: str | None,
+    run_id: str,
+    stop_event: threading.Event,
+) -> None:
     try:
-        run_pipeline(resume_path, min_fit_score, events, profile_name)
+        run_pipeline(resume_path, min_fit_score, events, profile_name, stop_event=stop_event)
     finally:
         with ACTIVE_PROFILES_LOCK:
             ACTIVE_PROFILES.discard(profile_name)
+            if ACTIVE_RUNS.get(profile_name) == run_id:
+                ACTIVE_RUNS.pop(profile_name, None)
+        STOP_EVENTS.pop(run_id, None)
 
 
 @app.get("/")
@@ -77,7 +103,10 @@ async def start_run(
             label = profile or "your account"
             raise HTTPException(
                 status_code=409,
-                detail=f"A run is already in progress for {label}. Wait for it to finish before starting another.",
+                detail={
+                    "message": f"A run is already in progress for {label}.",
+                    "run_id": ACTIVE_RUNS.get(profile),
+                },
             )
         ACTIVE_PROFILES.add(profile)
 
@@ -88,13 +117,160 @@ async def start_run(
 
     events: queue.Queue = queue.Queue()
     RUNS[run_id] = events
+    stop_event = threading.Event()
+    STOP_EVENTS[run_id] = stop_event
+    with ACTIVE_PROFILES_LOCK:
+        ACTIVE_RUNS[profile] = run_id
 
     thread = threading.Thread(
-        target=_run_and_release, args=(resume_path, min_fit_score, events, profile), daemon=True
+        target=_run_and_release,
+        args=(resume_path, min_fit_score, events, profile, run_id, stop_event),
+        daemon=True,
     )
     thread.start()
 
     return {"run_id": run_id}
+
+
+@app.post("/api/run/{run_id}/stop")
+async def stop_run(run_id: str) -> dict:
+    """Signals the running pipeline to stop as soon as it can -- the
+    platform currently mid-LLM-call or mid-apply finishes that one step,
+    then every platform thread breaks out of its job loop instead of
+    moving on to the next posting."""
+    stop_event = STOP_EVENTS.get(run_id)
+    if stop_event is None:
+        raise HTTPException(status_code=404, detail="Unknown or already-finished run_id.")
+    stop_event.set()
+    return {"ok": True}
+
+
+@app.get("/api/memory")
+async def list_memory(profile: str | None = None) -> list[dict]:
+    """Facts/preferences the candidate has told their agent directly,
+    shown as the Profile tab's flowgraph and woven into every scoring/
+    tailoring prompt (see src/memory.py and webapp/runner.py)."""
+    profile = (profile or "").strip() or None
+    return memory_store.load_facts(profile)
+
+
+@app.post("/api/memory")
+async def create_memory(profile: str | None = Form(None), text: str = Form(...)) -> dict:
+    profile = (profile or "").strip() or None
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Memory text can't be empty.")
+    api_key = app_settings.resolve_api_key()
+    tag = memory_store.suggest_tag(text, api_key) if api_key else text[:24]
+    return memory_store.add_fact(profile, text, tag)
+
+
+@app.delete("/api/memory/{fact_id}")
+async def delete_memory(fact_id: str, profile: str | None = None) -> dict:
+    profile = (profile or "").strip() or None
+    ok = memory_store.delete_fact(profile, fact_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Unknown memory entry.")
+    return {"ok": True}
+
+
+@app.post("/api/memory/sync-resume")
+async def sync_memory_from_resume(resume: UploadFile = File(...), profile: str | None = Form(None)) -> dict:
+    """Parses a resume (same parser the Agent tab's run uses) purely to
+    seed the Profile tab's memory graph with headline/experience/skills
+    facts -- no job search, no applying, nothing platform-related. Exists
+    because the pipeline's own auto-seed (webapp/runner.py) only fires the
+    first time an account's memory is completely empty, so an account that
+    already had a manually-typed note (or ran before this feature existed)
+    never got resume facts automatically; this lets the Profile tab ask for
+    them on demand instead. Skips any fact whose exact text is already
+    stored, so repeat use doesn't pile up duplicates."""
+    profile = (profile or "").strip() or None
+    api_key = app_settings.resolve_api_key()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="No API key set -- add one in Settings, or set ANTHROPIC_API_KEY in .env")
+
+    paths = resolve_profile_paths(profile)
+    suffix = Path(resume.filename or "resume.pdf").suffix or ".pdf"
+    tmp_path = UPLOADS_DIR / f"sync-{uuid.uuid4().hex}{suffix}"
+    tmp_path.write_bytes(await resume.read())
+    try:
+        parsed = parse_resume(str(tmp_path), api_key, cache_dir=paths.cache_dir, model=app_settings.resolve_model())
+        parsed = apply_profile_overrides(profile, parsed)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    existing_texts = {f["text"] for f in memory_store.load_facts(profile)}
+    added = []
+
+    def _maybe_add(text: str, tag: str) -> None:
+        if text and text not in existing_texts:
+            added.append(memory_store.add_fact(profile, text, tag))
+            existing_texts.add(text)
+
+    if parsed.headline:
+        _maybe_add(parsed.headline, parsed.headline[:28])
+    if parsed.years_of_experience:
+        _maybe_add(
+            f"{parsed.years_of_experience} years of professional experience",
+            f"{parsed.years_of_experience}+ yrs experience",
+        )
+    for skill in parsed.skills[:5]:
+        _maybe_add(f"Skilled in {skill}", skill)
+
+    return {"added": added, "facts": memory_store.load_facts(profile)}
+
+
+@app.get("/api/settings")
+async def get_settings() -> dict:
+    """Everything the Settings tab shows: which platforms are enabled (the
+    saved override if one exists, otherwise the root account's own
+    search_config.yaml -- so the toggles reflect real current behavior on
+    first load, not an arbitrary default), the API key's status (never the
+    key itself), the active model, and the model menu to choose from."""
+    saved_platforms = app_settings.platform_overrides()
+    if saved_platforms is None:
+        cfg_path = resolve_profile_paths(None).config_path
+        try:
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except (FileNotFoundError, yaml.YAMLError):
+            cfg = {}
+        saved_platforms = {p: bool(cfg.get("platforms", {}).get(p, False)) for p in app_settings.ALL_PLATFORMS}
+    return {
+        "platforms": saved_platforms,
+        "api_key": app_settings.api_key_status(),
+        "model": app_settings.resolve_model(),
+        "available_models": app_settings.AVAILABLE_MODELS,
+        "max_applications_per_platform_per_day": app_settings.max_applications_override(),
+    }
+
+
+@app.post("/api/settings")
+async def update_settings(
+    api_key: str | None = Form(None),
+    model: str | None = Form(None),
+    platforms: str | None = Form(None),
+    max_applications_per_platform_per_day: int | None = Form(None),
+) -> dict:
+    patch: dict = {}
+    if api_key is not None:
+        patch["api_key"] = api_key
+    if model:
+        if model not in app_settings.AVAILABLE_MODELS:
+            raise HTTPException(status_code=422, detail=f"Unknown model '{model}'.")
+        patch["model"] = model
+    if platforms is not None:
+        try:
+            parsed_platforms = json.loads(platforms)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=422, detail="platforms must be a JSON object.")
+        patch["platforms"] = parsed_platforms
+    if max_applications_per_platform_per_day is not None:
+        patch["max_applications_per_platform_per_day"] = max_applications_per_platform_per_day
+
+    app_settings.save_settings(patch)
+    return await get_settings()
 
 
 @app.get("/api/stream/{run_id}")

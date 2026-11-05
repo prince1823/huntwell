@@ -62,7 +62,7 @@ export default function TrackerTab({ profile }) {
   const total = apps.length;
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-28 pt-6">
+    <div className="mx-auto max-w-md px-4 pb-10 pt-6 sm:max-w-2xl sm:px-6 lg:max-w-none lg:px-10 xl:px-16">
       <div className="mb-4 flex items-center gap-2">
         <LineChart size={20} className="text-sage" />
         <h1 className="text-lg font-bold text-ink">Tracker</h1>
@@ -77,8 +77,8 @@ export default function TrackerTab({ profile }) {
       )}
 
       {!loading && total > 0 && (
-        <>
-          <div className="mb-5 rounded-3xl border border-line bg-white p-4">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div className="rounded-3xl border border-line bg-white p-4">
             <div className="mb-3 text-xs font-bold uppercase tracking-wide text-ink/40">By outcome</div>
             <div className="flex flex-col gap-3">
               {Object.entries(byStatus)
@@ -99,7 +99,7 @@ export default function TrackerTab({ profile }) {
                 ))}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

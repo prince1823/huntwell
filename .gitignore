@@ -4,6 +4,8 @@ __pycache__/
 .claude/
 !.claude/launch.json
 .env
+app_settings.json
+memory.json
 auth_state/
 applications.db
 .cache/

@@ -94,10 +94,10 @@ export default function JobsTab() {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-28 pt-6">
+    <div className="mx-auto max-w-md px-4 pb-10 pt-6 sm:max-w-2xl sm:px-6 lg:max-w-none lg:px-10 xl:px-16">
       <div className="mb-1 flex items-center gap-2">
         <Briefcase size={20} className="text-sage" />
-        <h1 className="text-lg font-bold text-ink">Needs you</h1>
+        <h1 className="text-lg font-bold text-ink">Review &amp; submit</h1>
       </div>
       <p className="mb-4 text-xs text-ink/50">
         Filled completely and held right before Submit. Open to bring up the real browser window, solve any captcha, and
@@ -114,7 +114,7 @@ export default function JobsTab() {
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {items.map((item) => (
           <JobCard key={item.id} item={item} onOpen={handleOpen} onResolve={handleResolve} busy={busyId === item.id} />
         ))}

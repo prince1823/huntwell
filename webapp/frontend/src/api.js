@@ -23,6 +23,10 @@ export async function startRun({ resumeFile, profile, minFitScore }) {
   return json(res);
 }
 
+export async function stopRun(runId) {
+  return json(await fetch(`${BASE}/api/run/${runId}/stop`, { method: "POST" }));
+}
+
 export function streamRun(runId, onEvent) {
   const source = new EventSource(`${BASE}/api/stream/${runId}`);
   source.onmessage = (ev) => {
@@ -49,6 +53,43 @@ export async function resolveHitl(entryId) {
 export async function fetchStats(profile) {
   const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
   return json(await fetch(`${BASE}/api/stats${qs}`));
+}
+
+export async function fetchMemory(profile) {
+  const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+  return json(await fetch(`${BASE}/api/memory${qs}`));
+}
+
+export async function addMemoryFact({ profile, text }) {
+  const form = new FormData();
+  if (profile) form.append("profile", profile);
+  form.append("text", text);
+  return json(await fetch(`${BASE}/api/memory`, { method: "POST", body: form }));
+}
+
+export async function deleteMemoryFact(factId, profile) {
+  const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+  return json(await fetch(`${BASE}/api/memory/${factId}${qs}`, { method: "DELETE" }));
+}
+
+export async function syncMemoryFromResume({ profile, resumeFile }) {
+  const form = new FormData();
+  form.append("resume", resumeFile);
+  if (profile) form.append("profile", profile);
+  return json(await fetch(`${BASE}/api/memory/sync-resume`, { method: "POST", body: form }));
+}
+
+export async function fetchSettings() {
+  return json(await fetch(`${BASE}/api/settings`));
+}
+
+export async function saveSettings({ apiKey, model, platforms, maxApplicationsPerPlatformPerDay }) {
+  const form = new FormData();
+  if (apiKey !== undefined) form.append("api_key", apiKey);
+  if (model) form.append("model", model);
+  if (platforms) form.append("platforms", JSON.stringify(platforms));
+  if (maxApplicationsPerPlatformPerDay) form.append("max_applications_per_platform_per_day", String(maxApplicationsPerPlatformPerDay));
+  return json(await fetch(`${BASE}/api/settings`, { method: "POST", body: form }));
 }
 
 export async function fetchApplications({ profile, status, q } = {}) {
