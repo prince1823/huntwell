@@ -16,6 +16,7 @@ from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
 from src.platforms.wellfound import WellfoundAdapter
+from src.platforms.workable import WorkableAdapter
 from src.resume_parser import parse_resume
 from src.tracker import Tracker
 
@@ -26,6 +27,7 @@ ADAPTERS = {
     "indeed": IndeedAdapter,
     "wellfound": WellfoundAdapter,
     "ashby": AshbyAdapter,
+    "workable": WorkableAdapter,
 }
 
 
