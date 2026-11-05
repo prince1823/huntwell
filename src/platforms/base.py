@@ -32,6 +32,23 @@ _CAPTCHA_TEXT = re.compile(
 )
 _CHALLENGE_URL = re.compile(r"captcha|challenge|cdn-cgi|turnstile|hcaptcha|recaptcha", re.I)
 
+# Matches an explicit minimum-years-of-experience requirement in JD text --
+# "2+ years", "minimum 2 years", "at least 2 years", a range like "2-5
+# years" (lower bound), or the short sidebar-style "Experience: 2+ years"
+# label some boards show. Confirmed live (2026-11-02): a real posting
+# ("Full Stack Developer" @ Monsoon CreditTech, Wellfound) required 2+
+# years against a 1-year candidate and still went through -- its title
+# carried no seniority keyword, so nothing upstream (LinkedIn's f_E filter,
+# Wellfound's slider, or score_fit, which never even sees JD text until
+# apply() -- see each adapter's own call site) had a chance to catch it.
+_MIN_YEARS_RE = re.compile(
+    r"(\d+)\s*\+\s*years?|"
+    r"(?:minimum|min\.?)\s*(?:of\s*)?(\d+)\s*\+?\s*years?|"
+    r"at\s*least\s*(\d+)\s*\+?\s*years?|"
+    r"(\d+)\s*(?:-|–|to)\s*\d+\s*\+?\s*years?",
+    re.I,
+)
+
 
 class PlatformAdapter(ABC):
     """Common interface every job site adapter implements.
@@ -44,11 +61,44 @@ class PlatformAdapter(ABC):
     name: str = "base"
     requires_login: bool = True
 
-    def __init__(self, context: BrowserContext, tailor: Tailor, config: dict):
+    def __init__(
+        self,
+        context: BrowserContext,
+        tailor: Tailor,
+        config: dict,
+        hitl: bool = False,
+        hitl_live: bool = False,
+    ):
         self.context = context
         self.tailor = tailor
         self.config = config
         self.page = context.new_page()
+        # Human-in-the-loop mode: fill the form completely, then stop
+        # BEFORE clicking Submit instead of submitting and verifying
+        # ourselves -- see _queue_for_review. Only ever True for a
+        # guest-apply/CAPTCHA-prone platform run from the webapp.
+        #
+        # The search/fill pass itself always runs headless=True, same as
+        # every other platform, with no visible window at all -- a real
+        # headed window popping up per candidate (or per queued job, with
+        # an earlier "keep it open, minimized" design) was tried and
+        # explicitly rejected live (2026-11-04): Playwright has no
+        # headless<->headed toggle on an existing page, so "fill
+        # invisibly, then reveal that exact filled page" literally isn't
+        # possible -- only refill-on-demand is. hitl_live distinguishes
+        # the two passes this now means:
+        #   hitl=True, hitl_live=False: the normal headless discovery
+        #     pass. _queue_for_review just records which job/platform/
+        #     profile for later (webapp/hitl_queue.py) -- nothing to keep
+        #     alive, this browser closes normally like any other run.
+        #   hitl=True, hitl_live=True: triggered by a human clicking
+        #     "Open" on a queued entry -- a FRESH headed browser,
+        #     launched just for this one job, re-fills it live (not the
+        #     literal original page/state, a fresh equivalent run) and
+        #     then stays open for the human to solve any captcha and
+        #     submit themselves.
+        self.hitl = hitl
+        self.hitl_live = hitl_live
 
     def _form_delay_cfg(self) -> dict:
         return self.config.get("form_fill_delay_ms") or {}
@@ -155,6 +205,67 @@ class PlatformAdapter(ABC):
         if captcha_seen or self._captcha_blocking():
             return "captcha"
         return "unconfirmed"
+
+    def _queue_for_review(self, job: JobPosting) -> ApplicationResult:
+        """Called instead of clicking Submit when self.hitl is True, once a
+        form is fully and validly filled. Never auto-retried or
+        auto-submitted by us past this point -- a human solves any
+        CAPTCHA and submits by hand.
+
+        hitl_live=False (the normal headless discovery pass): just
+        records enough to re-fill this exact job later -- platform, the
+        job itself, which resume/account (self.resume_path/profile_name,
+        set externally by webapp/runner.py before apply() runs) -- in
+        webapp/hitl_queue.py. This page/browser closes normally right
+        after, same as any other job; there is nothing live worth
+        keeping, by design (see __init__'s docstring for why).
+
+        hitl_live=True (a human clicked "Open" on that queued entry,
+        which launched a fresh HEADED browser just for this one job and
+        got here by re-running apply() on it): nothing to record, it's
+        already in the queue -- just report success and leave this page
+        exactly as filled. webapp/hitl_queue.py's _open_worker is the one
+        that keeps this browser alive afterward and tears it down once
+        the human is done.
+
+        Imports webapp.hitl_queue lazily: base.py is also imported by the
+        CLI (main.py), which has no reason to depend on the webapp package
+        at all when self.hitl is never True there.
+        """
+        if not self.hitl_live:
+            from webapp.hitl_queue import add as _hitl_add
+
+            _hitl_add(job, self.name, getattr(self, "resume_path", None), getattr(self, "profile_name", None))
+        return ApplicationResult(
+            job=job,
+            status="pending_review",
+            reason="Filled and ready -- open it from the HITL queue to solve any captcha and submit",
+        )
+
+    @staticmethod
+    def _jd_experience_mismatch(description: str, years_of_experience: int) -> str | None:
+        """Checked once the real JD text is actually available (apply()'s
+        own description scrape -- search_jobs doesn't have it; see the
+        comment on _MIN_YEARS_RE for why that matters). Returns a reason
+        string naming the mismatch when the JD explicitly states a minimum
+        above what the candidate has, else None.
+
+        Only the LOWEST stated minimum counts, not the first or the
+        highest -- a posting can legitimately read "2+ years, 5+ years for
+        senior candidates", where the lower number is the real floor for
+        this role. Taking the highest number instead would flag roles the
+        candidate actually qualifies for under an easier tier.
+        """
+        if not description:
+            return None
+        matches = _MIN_YEARS_RE.findall(description)
+        required = min(
+            (int(g) for groups in matches for g in groups if g),
+            default=None,
+        )
+        if required is not None and required > years_of_experience:
+            return f"JD states {required}+ years required, candidate has {years_of_experience}"
+        return None
 
     @abstractmethod
     def ensure_logged_in(self, email: str, password: str, headless: bool = False) -> None:

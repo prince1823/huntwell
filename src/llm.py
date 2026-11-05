@@ -343,13 +343,39 @@ QUESTION: {question}
         prompt = f"""Score how well this candidate fits this job posting, from 0.0 (no fit) to
 1.0 (excellent fit). Reply with ONLY a number like 0.73, nothing else.
 
-Weigh seniority/experience fit explicitly: if the posting requires
-significantly more years of experience than the candidate has (e.g. a
-"Senior"/"Staff"/"Lead" role or one stating "5+ years" when the candidate has
-{profile.years_of_experience}), score it low (under 0.3) even if the skills
-otherwise match -- they would likely be auto-rejected or wasting an
-application. Conversely don't penalize entry-level postings for a candidate
-with limited experience.
+Score as a weighted combination of three factors. EXPERIENCE/SENIORITY FIT
+and TITLE/ROLE-TYPE MATCH are co-primary -- equally weighted, and together
+they dominate the score. SKILLS/DOMAIN RELEVANCE is the smallest factor: it
+can only pull the score up within the ceiling the other two allow, never
+override either of them.
+
+1. EXPERIENCE/SENIORITY FIT (co-primary). Compare the candidate's
+   {profile.years_of_experience} years against whatever the posting states
+   or implies (an explicit "X+ years"/"minimum X years", or a seniority
+   word in the title -- "Senior"/"Staff"/"Lead"/"Principal"/"Director" imply
+   roughly 5+, 8+, 5+, 8+, 10+ years respectively absent a stated number).
+   A clear mismatch (posting wants meaningfully more than the candidate
+   has) caps the WHOLE score at 0.2 regardless of how well skills match --
+   a skills-perfect candidate still gets auto-rejected by an experience
+   gate, so don't let skill match compensate for it. An entry-level/
+   junior/new-grad/intern posting, or one with no stated experience
+   requirement at all, is never penalized for a candidate with limited
+   experience -- that's the opposite error, and just as costly.
+2. TITLE/ROLE-TYPE MATCH (co-primary, same weight as experience fit). Does
+   the posting's title actually describe the kind of role the candidate is
+   looking for (per CANDIDATE HEADLINE below), not just a role in the same
+   general field? A substantively different role type (e.g. a QA/support/
+   sales-engineering title for a candidate targeting pure software
+   engineering) caps the score the same way an experience mismatch does --
+   don't let strong skills overlap paper over a role-type mismatch either.
+3. SKILLS/DOMAIN RELEVANCE (the smallest factor). Only matters once
+   experience fit and title fit are both established; a skills-perfect
+   posting that fails either of the other two stays capped per above.
+
+The job description below may be empty or truncated (not every platform has
+the full text available at this stage) -- when it is, rely on the title's
+own wording for both rules 1 and 2, and don't assume a good fit just
+because nothing contradicts it.
 
 CANDIDATE HEADLINE: {profile.headline}
 CANDIDATE SKILLS: {", ".join(profile.skills)}

@@ -294,6 +294,15 @@ class AshbyAdapter(PlatformAdapter):
         except Exception:
             pass
 
+        # search_jobs never populates job.description, so fit-scoring has
+        # no JD text to weigh seniority against -- same gap confirmed live
+        # on Wellfound/LinkedIn (a title with no seniority keyword hid an
+        # explicit "2+ years" requirement from a 1-year candidate). Catch
+        # it here too, before spending an actual application on it.
+        mismatch = self._jd_experience_mismatch(job.description, profile.years_of_experience)
+        if mismatch:
+            return ApplicationResult(job=job, status="skipped", reason=mismatch)
+
         entries = self.page.locator("div.ashby-application-form-field-entry")
         if entries.count() == 0:
             return ApplicationResult(job=job, status="needs_review", reason="No application form found")
@@ -320,6 +329,9 @@ class AshbyAdapter(PlatformAdapter):
             return ApplicationResult(
                 job=job, status="needs_review", reason="Submit button disabled -- a required field was likely missed"
             )
+
+        if self.hitl:
+            return self._queue_for_review(job)
 
         pre_submit_url = self.page.url
         self._human_field_pause()

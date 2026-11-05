@@ -48,6 +48,19 @@ max_applications_per_platform_per_day: 10  # default/fallback for any platform n
 apply_delay_seconds:
   min: 60
   max: 150
+  # Shorter per-platform overrides -- LinkedIn/Wellfound use a real,
+  # already-logged-in account (not a guest-apply form), and have zero
+  # CAPTCHA incidents across every run so far, unlike Ashby/Workable/
+  # Rippling's confirmed burst-sensitivity. Not live-verified that this
+  # specific range is safe for LinkedIn long-term -- a judgment call to
+  # speed runs up, watch for any new "needs_review"/block pattern after
+  # this change and widen it back if one shows up.
+  linkedin:
+    min: 10
+    max: 20
+  wellfound:
+    min: 10
+    max: 20
 
 # Pauses INSIDE a single Ashby/Workable form, independent of the gap
 # between applications above. field_* is the wait before each widget
@@ -146,6 +159,7 @@ rippling_companies:
   - "aalo-atomics"
   - "contour-education"
   - "perle"
+  - "parentsquare"
 
 # Answers used for common screening questions when the LLM can't infer them from your resume.
 # Edit these to your actual numbers -- without them, the agent has to guess a

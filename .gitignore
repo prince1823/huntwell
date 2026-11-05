@@ -14,3 +14,5 @@ profile_overrides.yaml
 *.docx
 webapp/uploads/
 .DS_Store
+webapp/frontend/node_modules/
+webapp/frontend/dist/

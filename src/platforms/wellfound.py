@@ -133,7 +133,13 @@ class WellfoundAdapter(PlatformAdapter):
             self.page.keyboard.press("Escape")
             self.page.wait_for_timeout(2000)
 
-        self._set_experience_filter(max(profile.years_of_experience + 1, 1))
+        # No +1 buffer -- confirmed live (2026-11-02) that was letting
+        # "2+ years" postings pass a 1-year candidate's filter, since a
+        # max-2 slider range includes a role whose own floor IS 2. A
+        # strict ceiling at the candidate's own years is the actual ask;
+        # the apply()-time _jd_experience_mismatch check is the backstop
+        # for whatever this slider's own granularity still lets through.
+        self._set_experience_filter(max(profile.years_of_experience, 1))
 
         # The company/job list is virtualized like LinkedIn's -- poll
         # briefly rather than trusting a single count() read right after
@@ -256,6 +262,17 @@ class WellfoundAdapter(PlatformAdapter):
             job.description = self._extract_description()
         except Exception:
             pass
+
+        # The search-stage experience filter (and fit-scoring, which has no
+        # JD text to work with until this exact point -- see
+        # _jd_experience_mismatch's docstring) can both miss a posting whose
+        # title carries no seniority keyword. Confirmed live (2026-11-02):
+        # a "Full Stack Developer" posting stating "2+ years" against a
+        # 1-year candidate made it this far. Catch it here, before spending
+        # an actual application on it.
+        mismatch = self._jd_experience_mismatch(job.description, profile.years_of_experience)
+        if mismatch:
+            return ApplicationResult(job=job, status="skipped", reason=mismatch)
 
         apply_btn = self.page.get_by_role("button", name=re.compile(r"^Apply$", re.I))
         if apply_btn.count() == 0:

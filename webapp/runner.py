@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import queue
 import threading
@@ -13,7 +12,6 @@ from playwright.sync_api import sync_playwright
 from src.llm import Tailor
 from src.models import ApplicationResult, Profile
 from src.platforms.ashby import AshbyAdapter
-from src.platforms.base import PlatformAdapter
 from src.platforms.indeed import IndeedAdapter
 from src.platforms.linkedin import LinkedInAdapter
 from src.platforms.rippling import RipplingAdapter
@@ -23,6 +21,13 @@ from src.profile_overrides import apply_profile_overrides
 from src.profile_paths import resolve_profile_paths
 from src.resume_parser import parse_resume
 from src.tracker import Tracker
+
+# These are guest-apply/CAPTCHA-prone platforms where a successfully
+# filled form stops short of Submit and goes to the human-in-the-loop
+# queue instead (see src/platforms/base.py's _queue_for_review) --
+# LinkedIn and Wellfound use a real account and have never hit a CAPTCHA,
+# so they keep auto-submitting as before.
+HITL_PLATFORMS = {"ashby", "workable", "rippling"}
 
 ADAPTERS = {
     "linkedin": LinkedInAdapter,
@@ -43,17 +48,6 @@ ADAPTERS = {
 # (starting the driver, launching the browser); every platform still
 # searches/applies fully in parallel once its own browser is up.
 _PLAYWRIGHT_LAUNCH_LOCK = threading.Lock()
-
-
-@contextlib.contextmanager
-def _serialized_playwright():
-    with _PLAYWRIGHT_LAUNCH_LOCK:
-        pw_cm = sync_playwright()
-        pw = pw_cm.__enter__()
-    try:
-        yield pw
-    finally:
-        pw_cm.__exit__(None, None, None)
 
 
 def _emit(events: queue.Queue, event: dict) -> None:
@@ -150,7 +144,7 @@ def run_pipeline(
             # silently killed every platform thread the first time this ran.
             t = threading.Thread(
                 target=_run_one_platform,
-                args=(platform, cfg, profile, tailor, min_fit_score, events, paths.state_dir, paths.db_path),
+                args=(platform, cfg, profile, tailor, min_fit_score, events, paths.state_dir, paths.db_path, resume_path, profile_name),
                 daemon=True,
             )
             t.start()
@@ -175,6 +169,8 @@ def _run_one_platform(
     events: queue.Queue,
     state_dir: Path,
     db_path: Path,
+    resume_path: Path,
+    profile_name: str | None,
 ) -> None:
     adapter_cls = ADAPTERS[platform]
     state_file = state_dir / f"{platform}.json"
@@ -193,7 +189,7 @@ def _run_one_platform(
         return
 
     if not state_file.exists() and adapter_cls.requires_login:
-        _emit(events, 
+        _emit(events,
             {
                 "type": "platform_error",
                 "platform": platform,
@@ -204,130 +200,152 @@ def _run_one_platform(
         tracker.close()
         return
 
+    hitl = platform in HITL_PLATFORMS
+    # Same headless run as every other platform, no exceptions -- a HITL
+    # platform (Ashby/Workable/Rippling) just stops short of clicking
+    # Submit once a form is filled, instead of a visible window of any
+    # kind popping up during this pass. See src/platforms/base.py's
+    # __init__ docstring for why a real headed browser here (even
+    # minimized/off-screen) was tried and explicitly ruled out live
+    # (2026-11-04) in favor of refill-on-demand -- webapp/hitl_queue.py's
+    # browser-worker thread is what launches a headed browser later, only
+    # once, only for the one job a human actually clicks "Open" on.
+    with _PLAYWRIGHT_LAUNCH_LOCK:
+        pw_cm = sync_playwright()
+        pw = pw_cm.__enter__()
+        browser = pw.chromium.launch(headless=True)
+
     try:
-        with _serialized_playwright() as pw:
-            with _PLAYWRIGHT_LAUNCH_LOCK:
-                browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(storage_state=str(state_file) if state_file.exists() else None)
-            adapter: PlatformAdapter = adapter_cls(context, tailor, config)
+        context = browser.new_context(storage_state=str(state_file) if state_file.exists() else None)
+        adapter = adapter_cls(context, tailor, config, hitl=hitl)
+        if hitl:
+            # Needed by _queue_for_review to record which resume/account a
+            # later refill-on-demand ("Open" in the HITL queue) should use
+            # -- see src/platforms/base.py.
+            adapter.resume_path = str(resume_path)
+            adapter.profile_name = profile_name
 
-            try:
-                adapter.ensure_logged_in("", "", headless=True)
-            except RuntimeError as e:
-                _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
-                browser.close()
-                _emit(events, {"type": "platform_done", "platform": platform})
-                return
-            if adapter_cls.requires_login:
-                context.storage_state(path=str(state_file))
+        try:
+            adapter.ensure_logged_in("", "", headless=True)
+        except RuntimeError as e:
+            _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
+            browser.close()
+            pw_cm.__exit__(None, None, None)
+            return
+        if adapter_cls.requires_login:
+            context.storage_state(path=str(state_file))
 
-            postings = adapter.search_jobs(profile)
-            _emit(events, {"type": "platform_search", "platform": platform, "count": len(postings)})
+        postings = adapter.search_jobs(profile)
+        _emit(events, {"type": "platform_search", "platform": platform, "count": len(postings)})
 
-            applied_count = already_today
-            for job in postings:
-                if applied_count >= daily_cap:
-                    break
-                if tracker.already_handled(job):
-                    # Same visibility problem as the keyword-exclude case:
-                    # re-running the same search finds mostly postings
-                    # already recorded from earlier runs. Surface that
-                    # distinctly (not lumped into generic "skipped") so it's
-                    # clear *why* nothing new happened, instead of it
-                    # looking like the pipeline silently did nothing.
-                    _emit(events, 
-                        {
-                            "type": "result",
-                            "platform": platform,
-                            "company": job.company,
-                            "title": job.title,
-                            "url": job.url,
-                            "status": "duplicate",
-                            "fit": None,
-                            "jd": "",
-                            "reason": "already processed in an earlier run",
-                        }
-                    )
-                    continue
-                excluded_kw = next(
-                    (kw for kw in config.get("keywords_exclude", []) if kw.lower() in job.title.lower()),
-                    None,
-                )
-                if excluded_kw:
-                    # Emit a result even for keyword-filtered postings --
-                    # silently `continue`-ing left the UI showing "found N,
-                    # applying..." forever with no further events, which
-                    # reads as stuck/broken even though the filtering is
-                    # correct and intentional.
-                    _emit(events, 
-                        {
-                            "type": "result",
-                            "platform": platform,
-                            "company": job.company,
-                            "title": job.title,
-                            "url": job.url,
-                            "status": "skipped",
-                            "fit": None,
-                            "jd": (job.description or "")[:400],
-                            "reason": f"title matched excluded keyword '{excluded_kw}'",
-                        }
-                    )
-                    continue
-
-                fit = tailor.score_fit(profile, job)
-                if fit < min_fit_score:
-                    _emit(events, 
-                        {
-                            "type": "result",
-                            "platform": platform,
-                            "company": job.company,
-                            "title": job.title,
-                            "url": job.url,
-                            "status": "skipped",
-                            "fit": fit,
-                            "jd": (job.description or "")[:400],
-                            "reason": "below fit threshold",
-                        }
-                    )
-                    continue
-
-                try:
-                    result = adapter.apply(job, profile)
-                except Exception as e:  # noqa: BLE001
-                    result = ApplicationResult(job=job, status="failed", reason=str(e))
-
-                tracker.record(result)
-                if result.status == "applied":
-                    applied_count += 1
-
-                _emit(events, 
+        applied_count = already_today
+        for job in postings:
+            if applied_count >= daily_cap:
+                break
+            if tracker.already_handled(job):
+                # Same visibility problem as the keyword-exclude case:
+                # re-running the same search finds mostly postings
+                # already recorded from earlier runs. Surface that
+                # distinctly (not lumped into generic "skipped") so it's
+                # clear *why* nothing new happened, instead of it
+                # looking like the pipeline silently did nothing.
+                _emit(events,
                     {
                         "type": "result",
                         "platform": platform,
                         "company": job.company,
                         "title": job.title,
                         "url": job.url,
-                        "status": result.status,
-                        "fit": fit,
-                        "jd": (job.description or "")[:400],
-                        "reason": result.reason,
+                        "status": "duplicate",
+                        "fit": None,
+                        "jd": "",
+                        "reason": "already processed in an earlier run",
                     }
                 )
+                continue
+            excluded_kw = next(
+                (kw for kw in config.get("keywords_exclude", []) if kw.lower() in job.title.lower()),
+                None,
+            )
+            if excluded_kw:
+                # Emit a result even for keyword-filtered postings --
+                # silently `continue`-ing left the UI showing "found N,
+                # applying..." forever with no further events, which
+                # reads as stuck/broken even though the filtering is
+                # correct and intentional.
+                _emit(events,
+                    {
+                        "type": "result",
+                        "platform": platform,
+                        "company": job.company,
+                        "title": job.title,
+                        "url": job.url,
+                        "status": "skipped",
+                        "fit": None,
+                        "jd": (job.description or "")[:400],
+                        "reason": f"title matched excluded keyword '{excluded_kw}'",
+                    }
+                )
+                continue
 
-                # Same real gap between separate applications as the CLI
-                # (main.py) -- see its comment for why. 0/0 (the default)
-                # means no delay.
-                delay_cfg = config.get("apply_delay_seconds", {})
-                lo, hi = delay_cfg.get("min", 0), delay_cfg.get("max", 0)
-                if hi > 0:
-                    import random
-                    import time
+            fit = tailor.score_fit(profile, job)
+            if fit < min_fit_score:
+                _emit(events,
+                    {
+                        "type": "result",
+                        "platform": platform,
+                        "company": job.company,
+                        "title": job.title,
+                        "url": job.url,
+                        "status": "skipped",
+                        "fit": fit,
+                        "jd": (job.description or "")[:400],
+                        "reason": "below fit threshold",
+                    }
+                )
+                continue
 
-                    time.sleep(random.uniform(lo, hi))
+            try:
+                result = adapter.apply(job, profile)
+            except Exception as e:  # noqa: BLE001
+                result = ApplicationResult(job=job, status="failed", reason=str(e))
 
-            if adapter_cls.requires_login:
-                context.storage_state(path=str(state_file))
-            browser.close()
+            tracker.record(result)
+            if result.status == "applied":
+                applied_count += 1
+
+            _emit(events,
+                {
+                    "type": "result",
+                    "platform": platform,
+                    "company": job.company,
+                    "title": job.title,
+                    "url": job.url,
+                    "status": result.status,
+                    "fit": fit,
+                    "jd": (job.description or "")[:400],
+                    "reason": result.reason,
+                }
+            )
+
+            # Same real gap between separate applications as the CLI
+            # (main.py) -- see its comment for why. 0/0 (the default)
+            # means no delay.
+            delay_cfg = config.get("apply_delay_seconds", {})
+            # Optional per-platform override -- see main.py's matching
+            # call site for why (the burst-sensitivity this delay exists
+            # for was confirmed live on Ashby/Workable specifically, not
+            # LinkedIn/Wellfound's real-account flow).
+            platform_delay_cfg = delay_cfg.get(platform) if isinstance(delay_cfg.get(platform), dict) else delay_cfg
+            lo, hi = platform_delay_cfg.get("min", 0), platform_delay_cfg.get("max", 0)
+            if hi > 0:
+                import random
+                import time
+
+                time.sleep(random.uniform(lo, hi))
+
+        if adapter_cls.requires_login:
+            context.storage_state(path=str(state_file))
     except Exception as e:  # noqa: BLE001 -- one platform crashing shouldn't hang the UI
         # Only the short message reaches the UI (SSE event, nothing
         # persisted) -- this was the actual silent-failure gap: a real
@@ -339,6 +357,8 @@ def _run_one_platform(
         print(f"[{platform}] CRASHED:", flush=True)
         traceback.print_exc()
         _emit(events, {"type": "platform_error", "platform": platform, "message": str(e)})
+        browser.close()
+        pw_cm.__exit__(None, None, None)
     finally:
         tracker.close()
         _emit(events, {"type": "platform_done", "platform": platform})

@@ -133,7 +133,14 @@ def run_platform(
             # platforms that configure it (guest-apply/CAPTCHA-prone ones);
             # 0/0 (the default) means no delay.
             delay_cfg = config.get("apply_delay_seconds", {})
-            lo, hi = delay_cfg.get("min", 0), delay_cfg.get("max", 0)
+            # Optional per-platform override (e.g. {"linkedin": {"min": 10,
+            # "max": 25}, "min": 30, "max": 90}) -- the burst-sensitivity
+            # this delay exists for was specifically confirmed live on
+            # Ashby/Workable's CAPTCHA rate, not on LinkedIn/Wellfound's
+            # real-account flow, so a platform with no evidence of that
+            # risk doesn't have to pay the same cautious gap.
+            platform_delay_cfg = delay_cfg.get(platform) if isinstance(delay_cfg.get(platform), dict) else delay_cfg
+            lo, hi = platform_delay_cfg.get("min", 0), platform_delay_cfg.get("max", 0)
             if hi > 0:
                 import time
 
