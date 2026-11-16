@@ -87,7 +87,6 @@ max_applications_per_day:
 
 platforms:
   linkedin: true
-  indeed: false  # Cloudflare blocks even authenticated sessions, see README
   wellfound: true
   ashby: true    # guest apply, no account needed -- see ashby_companies below
   workable: true # guest apply, no account needed -- see workable_companies below

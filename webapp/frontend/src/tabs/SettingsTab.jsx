@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Check, KeyRound, Settings as SettingsIcon, Sliders } from "lucide-react";
 import { fetchSettings, saveSettings } from "../api";
+import { PLATFORM_IDS, PLATFORM_LABELS } from "../platforms";
 
-const PLATFORM_LABELS = { linkedin: "LinkedIn", wellfound: "Wellfound", ashby: "Ashby", workable: "Workable", rippling: "Rippling" };
 const PLATFORM_NOTES = {
   ashby: "guest apply, no login needed",
   workable: "guest apply, no login needed",
@@ -142,7 +142,7 @@ export default function SettingsTab() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard icon={Sliders} title="Platforms to apply on" subtitle="Toggle which job boards a run searches and applies through -- no need to edit config files.">
           <div className="flex flex-col gap-2">
-            {Object.keys(PLATFORM_LABELS).map((id) => (
+            {PLATFORM_IDS.map((id) => (
               <label
                 key={id}
                 className="flex cursor-pointer items-center justify-between rounded-2xl border border-line bg-cream px-3.5 py-2.5"

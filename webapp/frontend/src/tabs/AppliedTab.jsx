@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Clock, Search, SendHorizonal, UserCheck } from "lucide-react";
 import { fetchApplications, fetchStats } from "../api";
-
-const PLATFORM_LABELS = { linkedin: "LinkedIn", wellfound: "Wellfound", ashby: "Ashby", workable: "Workable", rippling: "Rippling" };
+import { PLATFORM_LABELS } from "../platforms";
 
 const STATUS_FILTERS = [
   { id: null, label: "All" },

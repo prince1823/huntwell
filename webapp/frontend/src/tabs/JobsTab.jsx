@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { Briefcase, ExternalLink, Loader2 } from "lucide-react";
 import { fetchHitl, openHitl, resolveHitl } from "../api";
-
-const PLATFORM_LABELS = { linkedin: "LinkedIn", wellfound: "Wellfound", ashby: "Ashby", workable: "Workable", rippling: "Rippling" };
+import { PLATFORM_LABELS } from "../platforms";
 
 const STATUS_META = {
   pending: { label: "Filled and ready", dot: "bg-sun" },

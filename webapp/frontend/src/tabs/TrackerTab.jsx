@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { LineChart } from "lucide-react";
 import { fetchApplications } from "../api";
+import { PLATFORM_LABELS } from "../platforms";
 
-const PLATFORM_LABELS = { linkedin: "LinkedIn", wellfound: "Wellfound", ashby: "Ashby", workable: "Workable", rippling: "Rippling" };
 const STATUS_COLOR = {
   applied: "bg-sage",
   needs_review: "bg-amber-500",

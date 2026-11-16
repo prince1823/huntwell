@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, ChevronDown, Copy, Eye, Loader2, SkipForward, XCircle } from "lucide-react";
-
-const PLATFORM_LABELS = { linkedin: "LinkedIn", wellfound: "Wellfound", ashby: "Ashby", workable: "Workable", rippling: "Rippling" };
+import { PLATFORM_LABELS } from "../platforms";
 
 const PLATFORM_COLORS = {
   linkedin: "bg-blue-600",
@@ -188,4 +187,4 @@ function PlatformCard({ state }) {
   );
 }
 
-export { PLATFORM_LABELS, PlatformMonogram, ResultCard, PlatformCard };
+export { PlatformMonogram, ResultCard, PlatformCard };
