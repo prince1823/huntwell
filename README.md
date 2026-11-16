@@ -1,4 +1,4 @@
-# Job Hunt Agent
+# Huntwell
 
 An AI agent that applies to jobs for you. Drop in a resume and it will:
 
@@ -38,8 +38,8 @@ It has a **web app** (the easiest way to use it — a local site with live progr
 ## 1. Clone the project
 
 ```bash
-git clone https://github.com/prince1823/job-hunt-auto-apply.git
-cd job-hunt-auto-apply
+git clone https://github.com/prince1823/huntwell.git
+cd huntwell
 ```
 
 ## 2. Install the backend (Python)

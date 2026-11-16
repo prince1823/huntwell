@@ -1,5 +1,5 @@
 services:
-  job-hunt-agent:
+  huntwell:
     build: .
     ports:
       - "8000:8000"

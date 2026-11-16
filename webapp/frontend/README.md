@@ -1,4 +1,4 @@
-# Job Hunt Agent -- frontend
+# Huntwell -- frontend
 
 The React source for the web app. Builds into `../static/`, which `webapp/server.py` serves directly -- there's no separate frontend server in production.
 
