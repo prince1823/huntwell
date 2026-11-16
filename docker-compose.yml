@@ -1,0 +1,19 @@
+services:
+  job-hunt-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    # The whole repo is bind-mounted, not just a few folders -- this app
+    # keeps ALL of its state (auth_state/, profiles/, applications.db,
+    # memory.json, app_settings.json, .cache/) as plain files at the repo
+    # root, the same way the CLI does. Mounting just those paths
+    # individually is a common Docker trap: a file that doesn't exist yet
+    # on the host gets silently created as a DIRECTORY inside the
+    # container instead. Mounting the whole directory sidesteps that
+    # entirely, and as a bonus, a code change on the host is picked up by
+    # `--reload`-style restarts without rebuilding the image.
+    volumes:
+      - .:/app
+    restart: unless-stopped

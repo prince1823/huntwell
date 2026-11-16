@@ -25,8 +25,9 @@ It has a **web app** (the easiest way to use it — a local site with live progr
 
 ## What you need before you start
 
-- **A Mac, Linux, or Windows computer** with [Python 3.10+](https://www.python.org/downloads/) and [Node.js 18+](https://nodejs.org/) installed.
+- **A Mac, Linux, or Windows computer** with [Python 3.10+](https://www.python.org/downloads/) installed. ([Node.js 18+](https://nodejs.org/) too, only if you plan to modify the web app's UI — see step 3.)
 - **Git**, to download (clone) the project.
+- *(Optional, but easiest)* **[Docker](https://www.docker.com/)**, if you'd rather skip installing Python/Node entirely — see **Deploying with Docker** below.
 - **An API key** from [platform.openai.com](https://platform.openai.com/api-keys) (or any OpenAI-compatible provider) — this is what pays for the AI that reads your resume, scores jobs, and writes your answers.
 - Your own logins for whichever of LinkedIn / Wellfound / Ashby / Workable / Rippling you want it to use (LinkedIn and Wellfound need a real account login; Ashby/Workable/Rippling are "guest apply" — no account needed).
 
@@ -98,6 +99,21 @@ Then open **http://127.0.0.1:8000** in your browser. That's it — the page you 
 | **Settings** | Turn platforms on/off, set your API key (BYOK), choose the AI model, and set a daily application cap — all without editing any config files. |
 
 **The first time you use a platform that needs a real login (LinkedIn, Wellfound):** the agent needs to see you log in once. Run the one-time CLI login for that platform (see **First-time login per platform** below) before using the web app — the web app itself always runs headless (no visible browser window), so it can't show you a login screen itself.
+
+---
+
+## Deploying with Docker (recommended for self-hosting)
+
+If you'd rather not install Python/Node yourself, or you want to run this on a server/VPS instead of your laptop, Docker packages everything (including Playwright's browser) into one command:
+
+```bash
+cp .env.example .env    # can stay blank -- add your key from Settings instead if you prefer
+docker compose up --build
+```
+
+Open **http://localhost:8000** (or `http://<your-server-ip>:8000` if it's running on a remote machine). The container stores everything (logins, application history, memory, settings) in the project folder on your host via a bind mount, so stopping/rebuilding the container never loses data, and a fresh `git pull` + `docker compose up --build` picks up updates without touching it.
+
+**One real caveat:** the container always runs headless, so it can't show you the visible browser window the one-time LinkedIn/Wellfound login needs (see the next section). Do that one-time login *outside* Docker first — on your own machine, with a normal Python install — then start the container; it'll pick up the saved `auth_state/` automatically since it's the same project folder.
 
 ---
 
@@ -219,4 +235,5 @@ webapp/
   server.py               FastAPI backend behind the web app
   runner.py                Runs the pipeline for one web-app request
   frontend/                The React web app's source (builds into webapp/static/)
+Dockerfile, docker-compose.yml   Self-hosted deployment -- see "Deploying with Docker" above
 ```
