@@ -88,6 +88,11 @@ max_applications_per_day:
 platforms:
   linkedin: true
   wellfound: true
+  # Ashby/Workable/Rippling are in development, not exposed in the web app
+  # (webapp/runner.py's RUN_PLATFORMS only runs linkedin/wellfound there) --
+  # their guest-apply forms hit CAPTCHAs often enough that they're not
+  # reliable enough for general use yet. These toggles only matter for the
+  # CLI (`python main.py --platforms ashby`), which still runs them.
   ashby: true    # guest apply, no account needed -- see ashby_companies below
   workable: true # guest apply, no account needed -- see workable_companies below
   rippling: true # guest apply, no account needed -- see rippling_companies below

@@ -13,7 +13,11 @@ DEFAULT_MODEL = "gpt-4o-mini"
 # can access works; this list is just a sane, curated menu for the Settings
 # tab rather than a free-text field most people have no reason to hand-type.
 AVAILABLE_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "gpt-5-mini", "gpt-5"]
-ALL_PLATFORMS = ["linkedin", "wellfound", "ashby", "workable", "rippling"]
+# Ashby/Workable/Rippling are deliberately left out -- see webapp/runner.py's
+# RUN_PLATFORMS comment. Only platforms a web-app user can actually toggle
+# belong here; the other three stay CLI-only (--platforms ashby, etc.) until
+# their CAPTCHA reliability is solved.
+ALL_PLATFORMS = ["linkedin", "wellfound"]
 
 
 def load_settings() -> dict:

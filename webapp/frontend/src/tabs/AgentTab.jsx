@@ -236,9 +236,8 @@ export default function AgentTab() {
               Be the first <span className="italic text-sage">to every job</span>
             </h1>
             <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-ink/55">
-              Drop a resume and I'll parse it, score every open role on LinkedIn, Wellfound, Ashby, Workable &amp;
-              Rippling, then apply to the ones that fit -- handing anything with a captcha to your Review &amp; submit
-              queue for a quick human click.
+              Drop a resume and I'll parse it, score every open role on LinkedIn &amp; Wellfound, then apply to the
+              ones that fit.
             </p>
           </div>
 

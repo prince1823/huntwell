@@ -70,7 +70,15 @@ def _emit(events: queue.Queue, event: dict) -> None:
     elif etype in ("platform_start", "platform_error", "platform_skipped", "platform_done"):
         print(f"[{platform}] {etype}" + (f": {event.get('message')}" if event.get("message") else ""), flush=True)
 
-RUN_PLATFORMS = ["linkedin", "wellfound", "ashby", "workable", "rippling"]
+# Ashby/Workable/Rippling adapters still exist (src/platforms/) and still
+# work in the CLI (main.py --platforms ashby, etc.) -- but their guest-apply
+# forms hit CAPTCHAs often enough in practice that they're not reliable
+# enough to expose to a casual web-app user yet. Excluded from the web
+# pipeline here (not from app_settings' platform toggles, which only ever
+# cover these two now -- see src/app_settings.py's ALL_PLATFORMS) until
+# that's solved. LinkedIn/Wellfound use a real logged-in account and have
+# never hit one.
+RUN_PLATFORMS = ["linkedin", "wellfound"]
 
 
 def _load_config(config_path: Path) -> dict:

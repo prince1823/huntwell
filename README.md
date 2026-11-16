@@ -3,10 +3,12 @@
 An AI agent that applies to jobs for you. Drop in a resume and it will:
 
 1. **Read your resume** and turn it into a structured profile (skills, experience, headline).
-2. **Search** LinkedIn, Wellfound, Ashby, Workable, and Rippling for roles that match.
+2. **Search LinkedIn and Wellfound** for roles that match.
 3. **Score every posting** for fit with AI, so it doesn't waste time on jobs you're clearly not a match for.
 4. **Fill out and submit the application** — cover letters, screening questions, the works — using your resume data.
 5. **Hand off anything it can't finish on its own** (a CAPTCHA, an unusual form) to a "Review & submit" queue so you just click once instead of filling the whole thing.
+
+> **Ashby, Workable, and Rippling support is in the codebase but not exposed in the web app yet.** Their guest-apply forms hit CAPTCHAs often enough in practice that they're not reliable for a casual user — see **Known gaps** below. LinkedIn and Wellfound use a real logged-in account and have never hit one.
 
 It has a **web app** (the easiest way to use it — a local site with live progress, a memory of your preferences, and a settings page) and a **command-line tool** (for running it unattended, on a schedule, or for multiple people's accounts at once).
 
@@ -29,7 +31,7 @@ It has a **web app** (the easiest way to use it — a local site with live progr
 - **Git**, to download (clone) the project.
 - *(Optional, but easiest)* **[Docker](https://www.docker.com/)**, if you'd rather skip installing Python/Node entirely — see **Deploying with Docker** below.
 - **An API key** from [platform.openai.com](https://platform.openai.com/api-keys) (or any OpenAI-compatible provider) — this is what pays for the AI that reads your resume, scores jobs, and writes your answers.
-- Your own logins for whichever of LinkedIn / Wellfound / Ashby / Workable / Rippling you want it to use (LinkedIn and Wellfound need a real account login; Ashby/Workable/Rippling are "guest apply" — no account needed).
+- Your own LinkedIn and/or Wellfound login (a real account — there's no "guest apply" for either).
 
 ---
 
@@ -91,12 +93,12 @@ Then open **http://127.0.0.1:8000** in your browser. That's it — the page you 
 
 | Tab | What it does |
 |---|---|
-| **Agent** | Drop in a resume (yours, or someone else's — see Accounts below), set a minimum fit score, and watch it search and apply live, platform by platform. |
-| **Review** | Anything the agent filled but couldn't safely submit itself (usually a CAPTCHA) — open it, solve the captcha, and submit with one click. |
+| **Agent** | Drop in a resume (yours, or someone else's — see Accounts below), set a minimum fit score, and watch it search and apply live on LinkedIn and Wellfound. |
+| **Review** | Mostly relevant to the in-development platforms (see **Known gaps**) — anything one of them filled but couldn't safely submit itself lands here for a one-click finish. LinkedIn/Wellfound apply directly and rarely need this. |
 | **Applied** | Every application it's made, with stats (submitted, successful, needing you, time saved) and filters. |
 | **Tracker** | A breakdown of outcomes by status and by platform. |
 | **Profile** | Its "memory" of you — preferences and facts (e.g. *"only FinTech roles, fully remote"*) that it factors into every job it scores and every answer it writes. Type new ones in anytime, or click "Fill from resume" to seed it straight from your resume. |
-| **Settings** | Turn platforms on/off, set your API key (BYOK), choose the AI model, and set a daily application cap — all without editing any config files. |
+| **Settings** | Turn LinkedIn/Wellfound on or off, set your API key (BYOK), choose the AI model, and set a daily application cap — all without editing any config files. |
 
 **The first time you use a platform that needs a real login (LinkedIn, Wellfound):** the agent needs to see you log in once. Run the one-time CLI login for that platform (see **First-time login per platform** below) before using the web app — the web app itself always runs headless (no visible browser window), so it can't show you a login screen itself.
 
@@ -126,8 +128,6 @@ python main.py --resume /path/to/your_resume.pdf --no-headless
 ```
 
 A real Chrome window opens. Log in by hand (clear any CAPTCHA/2FA yourself), and once you're in, the session is saved to `auth_state/<platform>.json`. From then on, both the CLI and the web app reuse that saved session — no more logins needed, until it eventually expires and you repeat this once more.
-
-Ashby, Workable, and Rippling don't need this — they're "guest apply" forms with no account required.
 
 ---
 
@@ -211,10 +211,11 @@ You can also upload a resume for a named profile straight from the web app's Age
 
 ## Known gaps
 
+- **Ashby, Workable, and Rippling are in development, not ready for general use.** The adapters exist (`src/platforms/ashby.py`, `workable.py`, `rippling.py`) and still work from the CLI (`python main.py --platforms ashby`), but their guest-apply forms hit CAPTCHAs often enough in practice that they're turned off in the web app by default — `RUN_PLATFORMS` in `webapp/runner.py` only includes LinkedIn and Wellfound right now. If you want to help get them reliable, that's the place to start.
 - **`needs_review` results** mean the adapter hit a form step it didn't recognize (or a CAPTCHA) and stopped rather than guessing — these land in the Review & submit queue for a quick human click.
 - **Postings that redirect to an external ATS** (occasional on LinkedIn/Wellfound) are marked `skipped`; there's no generic external-site filler.
 - **No resume/cover-letter file upload is wired up** yet for forms that specifically require attaching a PDF (rather than text fields) — these will stall and land in `needs_review`.
-- **LinkedIn's apply flow is the least reliable of the five platforms** right now, since LinkedIn's UI changes frequently and has no public API to fall back on — expect a noticeably lower "applied" rate there than on the guest-apply platforms (Ashby/Workable/Rippling), which use stable JSON APIs.
+- **LinkedIn's apply flow can still be flaky** since LinkedIn's UI changes frequently and has no public API to fall back on — expect it to need the Review queue more often than Wellfound does.
 
 ---
 

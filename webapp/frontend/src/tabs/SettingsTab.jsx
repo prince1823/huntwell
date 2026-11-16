@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, KeyRound, Settings as SettingsIcon, Sliders } from "lucide-react";
 import { fetchSettings, saveSettings } from "../api";
-import { PLATFORM_IDS, PLATFORM_LABELS } from "../platforms";
-
-const PLATFORM_NOTES = {
-  ashby: "guest apply, no login needed",
-  workable: "guest apply, no login needed",
-  rippling: "guest apply, no login needed",
-};
+import { ACTIVE_PLATFORM_IDS, PLATFORM_LABELS } from "../platforms";
 
 function SectionCard({ icon: Icon, title, subtitle, children }) {
   return (
@@ -142,15 +136,12 @@ export default function SettingsTab() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard icon={Sliders} title="Platforms to apply on" subtitle="Toggle which job boards a run searches and applies through -- no need to edit config files.">
           <div className="flex flex-col gap-2">
-            {PLATFORM_IDS.map((id) => (
+            {ACTIVE_PLATFORM_IDS.map((id) => (
               <label
                 key={id}
                 className="flex cursor-pointer items-center justify-between rounded-2xl border border-line bg-cream px-3.5 py-2.5"
               >
-                <div>
-                  <div className="text-sm font-medium text-ink">{PLATFORM_LABELS[id]}</div>
-                  {PLATFORM_NOTES[id] && <div className="text-[11px] text-ink/40">{PLATFORM_NOTES[id]}</div>}
-                </div>
+                <div className="text-sm font-medium text-ink">{PLATFORM_LABELS[id]}</div>
                 <input
                   type="checkbox"
                   checked={!!platforms[id]}
@@ -161,6 +152,10 @@ export default function SettingsTab() {
               </label>
             ))}
           </div>
+          <p className="mt-3 text-[11px] text-ink/35">
+            Ashby, Workable, and Rippling are still in development -- their guest-apply forms hit CAPTCHAs too often
+            to be reliable yet, so they're not offered here.
+          </p>
         </SectionCard>
 
         <SectionCard icon={KeyRound} title="API key (BYOK)" subtitle="Bring your own OpenAI-compatible key -- overrides the one in .env, used for every parse/score/tailor call.">
